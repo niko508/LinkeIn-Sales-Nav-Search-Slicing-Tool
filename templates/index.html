@@ -438,28 +438,24 @@ function resliceSlice(slice) {
       });
     }
   } else if (slice.depth === 1) {
-    // Split into individual year buckets: 5 YAC × 5 YIP
-    const yacSource = parsedFilters[FILTER_TYPE_YAC] || [];
+    // Split into 5 individual YIP buckets, keeping YAC fixed from parent
     const yipSource = parsedFilters[FILTER_TYPE_YIP] || [];
-    for (const yacY of YEAR_INDIVIDUAL) {
-      for (const yipY of YEAR_INDIVIDUAL) {
-        const fm = { ...slice.filterMap };
-        fm[FILTER_TYPE_YAC] = makeYACValues([yacY.id], yacSource);
-        fm[FILTER_TYPE_YIP] = makeYIPValues([yipY.id], yipSource);
-        newSlices.push({
-          id: makeId(),
-          pid,
-          depth: 2,
-          filterMap: fm,
-          yacIds: [yacY.id],
-          yipIds: [yipY.id],
-          count: null,
-          url: buildURL(fm),
-          fixedCombo: slice.fixedCombo,
-          yacBucketLabel: `YAC: ${yacY.label}`,
-          yipBucketLabel: `YIP: ${yipY.label}`,
-        });
-      }
+    for (const yipY of YEAR_INDIVIDUAL) {
+      const fm = { ...slice.filterMap };
+      fm[FILTER_TYPE_YIP] = makeYIPValues([yipY.id], yipSource);
+      newSlices.push({
+        id: makeId(),
+        pid,
+        depth: 2,
+        filterMap: fm,
+        yacIds: slice.yacIds,
+        yipIds: [yipY.id],
+        count: null,
+        url: buildURL(fm),
+        fixedCombo: slice.fixedCombo,
+        yacBucketLabel: slice.yacBucketLabel,
+        yipBucketLabel: `YIP: ${yipY.label}`,
+      });
     }
   }
 
