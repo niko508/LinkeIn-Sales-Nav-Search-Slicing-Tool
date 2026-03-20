@@ -260,8 +260,8 @@ const FILTER_TYPE_YAC = 'YEARS_AT_CURRENT_COMPANY';
 const FILTER_TYPE_YIP = 'YEARS_IN_CURRENT_POSITION';
 
 // id → display text maps (best-effort labels)
-const YAC_TEXT = { 1: '<1yr', 2: '1-2yrs', 3: '3-5yrs', 4: '6-10yrs', 5: '10+yrs' };
-const YIP_TEXT = { 1: '<1yr', 2: '1-2yrs', 3: '3-5yrs', 4: '6-10yrs', 5: '10+yrs' };
+const YAC_TEXT = { 1: 'Less than 1 year', 2: '1 to 2 years', 3: '3 to 5 years', 4: '6 to 10 years', 5: 'More than 10 years' };
+const YIP_TEXT = { 1: 'Less than 1 year', 2: '1 to 2 years', 3: '3 to 5 years', 4: '6 to 10 years', 5: 'More than 10 years' };
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -329,7 +329,7 @@ function buildFilterStr(type, values) {
 
 function buildURL(filterMap) {
   const parts = Object.entries(filterMap).map(([type, vals]) => buildFilterStr(type, vals));
-  const query = encodeURIComponent(parts.join(','));
+  const query = encodeURIComponent(`(filters:List(${parts.join(',')}))`);
   return `https://www.linkedin.com/sales/search/people?query=${query}&viewAllFilters=true`;
 }
 
