@@ -63,6 +63,7 @@
   .btn-reslice:hover { background: #e65100; }
   .btn-merge  { background: #8e24aa; color: #fff; }
   .btn-merge:hover  { background: #6a1b9a; }
+  .cannot-split-msg { font-size: .78rem; color: #92400e; background: #fef3c7; border-radius: 6px; padding: 4px 9px; }
 
   /* Detected filters */
   .filters-card {
@@ -411,50 +412,61 @@ function createInitialSlices(filters) {
   return result;
 }
 
+function canResliceFurther(slice) {
+  const yipIsIndividual = slice.yipIds !== null && slice.yipIds.length === 1;
+  const yacIsIndividual = slice.yacIds.length === 1;
+  return !(yipIsIndividual && yacIsIndividual);
+}
+
 function resliceSlice(slice) {
-  if (slice.depth >= 2) return [];
+  if (!canResliceFurther(slice)) return [];
 
   const newSlices = [];
   const pid = makeId();
+  const nextDepth = slice.depth + 1;
 
-  if (slice.depth === 0) {
-    // Split by YEARS_IN_CURRENT_POSITION (3 buckets), keep YAC fixed
+  const yipIsNull = slice.yipIds === null;
+  const yipIsIndividual = !yipIsNull && slice.yipIds.length === 1;
+
+  if (yipIsNull) {
+    // No YIP filter yet — split into 3 YIP buckets, keep YAC fixed
     const yipSource = parsedFilters[FILTER_TYPE_YIP] || [];
     for (const yipBucket of YEARS_IN_POSITION_BUCKETS) {
       const fm = { ...slice.filterMap };
       fm[FILTER_TYPE_YIP] = makeYIPValues(yipBucket.ids, yipSource);
       newSlices.push({
-        id: makeId(),
-        pid,
-        depth: 1,
-        filterMap: fm,
-        yacIds: slice.yacIds,
-        yipIds: yipBucket.ids,
-        count: null,
-        url: buildURL(fm),
-        fixedCombo: slice.fixedCombo,
-        yacBucketLabel: slice.yacBucketLabel,
-        yipBucketLabel: yipBucket.label,
+        id: makeId(), pid, depth: nextDepth, filterMap: fm,
+        yacIds: slice.yacIds, yipIds: yipBucket.ids, count: null,
+        url: buildURL(fm), fixedCombo: slice.fixedCombo,
+        yacBucketLabel: slice.yacBucketLabel, yipBucketLabel: yipBucket.label,
       });
     }
-  } else if (slice.depth === 1) {
-    // Split into 5 individual YIP buckets, keeping YAC fixed from parent
+  } else if (!yipIsIndividual) {
+    // YIP is a grouped bucket — split into 5 individual YIP values, keep YAC fixed
     const yipSource = parsedFilters[FILTER_TYPE_YIP] || [];
     for (const yipY of YEAR_INDIVIDUAL) {
       const fm = { ...slice.filterMap };
       fm[FILTER_TYPE_YIP] = makeYIPValues([yipY.id], yipSource);
       newSlices.push({
-        id: makeId(),
-        pid,
-        depth: 2,
-        filterMap: fm,
-        yacIds: slice.yacIds,
-        yipIds: [yipY.id],
-        count: null,
-        url: buildURL(fm),
-        fixedCombo: slice.fixedCombo,
-        yacBucketLabel: slice.yacBucketLabel,
-        yipBucketLabel: `YIP: ${yipY.label}`,
+        id: makeId(), pid, depth: nextDepth, filterMap: fm,
+        yacIds: slice.yacIds, yipIds: [yipY.id], count: null,
+        url: buildURL(fm), fixedCombo: slice.fixedCombo,
+        yacBucketLabel: slice.yacBucketLabel, yipBucketLabel: `YIP: ${yipY.label}`,
+      });
+    }
+  } else {
+    // YIP is already individual — split YAC into its individual ids, keep YIP fixed
+    const yacSource = parsedFilters[FILTER_TYPE_YAC] || [];
+    for (const yacId of slice.yacIds) {
+      const fm = { ...slice.filterMap };
+      fm[FILTER_TYPE_YAC] = makeYACValues([yacId], yacSource);
+      const yacIndiv = YEAR_INDIVIDUAL.find(y => y.id === yacId);
+      newSlices.push({
+        id: makeId(), pid, depth: nextDepth, filterMap: fm,
+        yacIds: [yacId], yipIds: slice.yipIds, count: null,
+        url: buildURL(fm), fixedCombo: slice.fixedCombo,
+        yacBucketLabel: `YAC: ${yacIndiv ? yacIndiv.label : yacId}`,
+        yipBucketLabel: slice.yipBucketLabel,
       });
     }
   }
@@ -562,9 +574,12 @@ function renderActions(slice, idx) {
   let html = '<div class="actions-cell">';
   const s = getStatus(slice);
 
-  // Re-slice button if over limit and depth < 2
-  if (s === 'overlimit' && slice.depth < 2) {
-    html += `<button class="btn btn-sm btn-reslice" onclick="doReslice(${idx})">Re-slice</button>`;
+  if (s === 'overlimit') {
+    if (canResliceFurther(slice)) {
+      html += `<button class="btn btn-sm btn-reslice" onclick="doReslice(${idx})">Re-slice</button>`;
+    } else {
+      html += `<span class="cannot-split-msg">Cannot split further — try narrowing your original search</span>`;
+    }
   }
 
   // Merge button: only if idx > 0 and eligible
