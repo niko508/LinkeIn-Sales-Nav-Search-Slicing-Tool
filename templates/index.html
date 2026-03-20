@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sales Navigator URL Slicer</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f0f4f8;
+    color: #1a2332;
+    min-height: 100vh;
+  }
+
+  header {
+    background: #0a66c2;
+    color: #fff;
+    padding: 24px 32px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  }
+  header h1 { font-size: 1.6rem; font-weight: 700; letter-spacing: -.3px; }
+  header p  { font-size: .9rem; opacity: .85; margin-top: 4px; }
+
+  main { max-width: 1200px; margin: 0 auto; padding: 28px 20px 60px; }
+
+  /* Input section */
+  .input-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.1);
+    margin-bottom: 20px;
+  }
+  .input-card label { font-weight: 600; font-size: .9rem; display: block; margin-bottom: 8px; }
+  .input-row { display: flex; gap: 10px; }
+  .input-row input {
+    flex: 1;
+    padding: 10px 14px;
+    border: 1.5px solid #cdd5e0;
+    border-radius: 8px;
+    font-size: .95rem;
+    transition: border-color .2s;
+  }
+  .input-row input:focus { outline: none; border-color: #0a66c2; }
+  .btn {
+    padding: 10px 22px;
+    border: none;
+    border-radius: 8px;
+    font-size: .9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s, transform .1s;
+  }
+  .btn:active { transform: scale(.97); }
+  .btn-primary { background: #0a66c2; color: #fff; }
+  .btn-primary:hover { background: #0958a8; }
+  .btn-danger  { background: #e53935; color: #fff; }
+  .btn-danger:hover { background: #c62828; }
+  .btn-sm { padding: 5px 12px; font-size: .8rem; }
+  .btn-reslice { background: #ff9800; color: #fff; }
+  .btn-reslice:hover { background: #e65100; }
+  .btn-merge  { background: #8e24aa; color: #fff; }
+  .btn-merge:hover  { background: #6a1b9a; }
+
+  /* Detected filters */
+  .filters-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 20px 24px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.1);
+    margin-bottom: 20px;
+  }
+  .filters-card h2 { font-size: 1rem; font-weight: 700; margin-bottom: 14px; color: #374151; }
+  .filter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px,1fr)); gap: 12px; }
+  .filter-item { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px; }
+  .filter-item .fi-label { font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: #64748b; margin-bottom: 6px; }
+  .fi-values { display: flex; flex-wrap: wrap; gap: 5px; }
+
+  /* Tags */
+  .tag {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 20px;
+    font-size: .78rem;
+    font-weight: 600;
+  }
+  .tag-blue   { background: #dbeafe; color: #1d4ed8; }
+  .tag-amber  { background: #fef3c7; color: #92400e; }
+  .tag-grey   { background: #e5e7eb; color: #374151; }
+  .tag-green  { background: #d1fae5; color: #065f46; }
+
+  /* Stats bar */
+  .stats-bar {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    background: #fff;
+    border-radius: 10px;
+    padding: 12px 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.1);
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .stat { font-size: .88rem; }
+  .stat span { font-weight: 700; }
+  .stat-total   span { color: #374151; }
+  .stat-verified span { color: #059669; }
+  .stat-overlimit span { color: #dc2626; }
+  .stat-pending span { color: #6b7280; }
+  .stats-bar .spacer { flex: 1; }
+
+  /* Table */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+  thead tr { background: #f1f5f9; }
+  th { padding: 12px 14px; text-align: left; font-size: .82rem; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: #64748b; white-space: nowrap; }
+  td { padding: 11px 14px; border-top: 1px solid #f0f4f8; vertical-align: middle; }
+  tr:hover td { background: #f8fafc; }
+
+  td.col-num { font-weight: 700; color: #374151; width: 50px; }
+  td.col-filters { max-width: 420px; }
+  td.col-open { width: 80px; text-align: center; }
+  td.col-count { width: 110px; }
+  td.col-status { width: 160px; }
+  td.col-actions { width: 220px; }
+
+  .open-link { color: #0a66c2; font-size: .85rem; font-weight: 600; text-decoration: none; }
+  .open-link:hover { text-decoration: underline; }
+
+  .count-input {
+    width: 90px;
+    padding: 6px 9px;
+    border: 1.5px solid #cdd5e0;
+    border-radius: 6px;
+    font-size: .9rem;
+    text-align: center;
+  }
+  .count-input:focus { outline: none; border-color: #0a66c2; }
+
+  /* Status badges */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: .82rem;
+    font-weight: 600;
+  }
+  .status-pending  { background: #f3f4f6; color: #6b7280; }
+  .status-verified { background: #d1fae5; color: #065f46; }
+  .status-overlimit { background: #fee2e2; color: #991b1b; }
+
+  .actions-cell { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+  /* Empty state */
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #94a3b8;
+  }
+  .empty-state .es-icon { font-size: 3rem; margin-bottom: 12px; }
+  .empty-state p { font-size: 1rem; }
+
+  /* Hidden */
+  .hidden { display: none !important; }
+
+  /* Error */
+  .error-msg { color: #dc2626; font-size: .88rem; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Sales Navigator URL Slicer</h1>
+  <p>Paste a LinkedIn Sales Navigator search URL to automatically slice it into segments under 2,500 results.</p>
+</header>
+
+<main>
+  <!-- Input -->
+  <div class="input-card">
+    <label for="urlInput">Sales Navigator Search URL</label>
+    <div class="input-row">
+      <input type="text" id="urlInput" placeholder="https://www.linkedin.com/sales/search/people?query=…" />
+      <button class="btn btn-primary" onclick="sliceURL()">Slice</button>
+      <button class="btn btn-danger" onclick="resetAll()">Reset</button>
+    </div>
+    <div id="errorMsg" class="error-msg hidden"></div>
+  </div>
+
+  <!-- Detected filters -->
+  <div id="filtersCard" class="filters-card hidden">
+    <h2>Detected Filters</h2>
+    <div id="filterGrid" class="filter-grid"></div>
+  </div>
+
+  <!-- Stats bar -->
+  <div id="statsBar" class="stats-bar hidden">
+    <div class="stat stat-total">Total: <span id="statTotal">0</span></div>
+    <div class="stat stat-verified">Verified: <span id="statVerified">0</span></div>
+    <div class="stat stat-overlimit">Over Limit: <span id="statOverlimit">0</span></div>
+    <div class="stat stat-pending">Pending: <span id="statPending">0</span></div>
+    <div class="spacer"></div>
+    <button class="btn btn-primary btn-sm" onclick="copyVerified()">Copy verified URLs</button>
+  </div>
+
+  <!-- Slices table -->
+  <div id="tableSection" class="hidden">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Filters Applied</th>
+            <th>Open</th>
+            <th>Count</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="slicesTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="emptyState" class="empty-state hidden">
+    <div class="es-icon">🔍</div>
+    <p>Paste a Sales Navigator URL above and click Slice to get started.</p>
+  </div>
+</main>
+
+<script>
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const YEARS_AT_COMPANY_BUCKETS = [
+  { label: 'YAC: <1yr–2yrs', ids: [1, 2] },
+  { label: 'YAC: 3–5yrs',    ids: [3]    },
+  { label: 'YAC: 6–10yrs+',  ids: [4, 5] },
+];
+
+const YEARS_IN_POSITION_BUCKETS = [
+  { label: 'YIP: <1yr–2yrs', ids: [1, 2] },
+  { label: 'YIP: 3–5yrs',    ids: [3]    },
+  { label: 'YIP: 6–10yrs+',  ids: [4, 5] },
+];
+
+const YEAR_INDIVIDUAL = [
+  { label: '<1yr',  id: 1 },
+  { label: '1-2yr', id: 2 },
+  { label: '3-5yr', id: 3 },
+  { label: '6-10yr',id: 4 },
+  { label: '10+yr', id: 5 },
+];
+
+const FIXED_DIMS = ['COMPANY_HEADQUARTERS', 'COMPANY_HEADCOUNT', 'CURRENT_TITLE', 'INDUSTRY'];
+
+const FILTER_TYPE_YAC = 'YEARS_AT_CURRENT_COMPANY';
+const FILTER_TYPE_YIP = 'YEARS_IN_CURRENT_POSITION';
+
+// id → display text maps (best-effort labels)
+const YAC_TEXT = { 1: '<1yr', 2: '1-2yrs', 3: '3-5yrs', 4: '6-10yrs', 5: '10+yrs' };
+const YIP_TEXT = { 1: '<1yr', 2: '1-2yrs', 3: '3-5yrs', 4: '6-10yrs', 5: '10+yrs' };
+
+// ─── State ────────────────────────────────────────────────────────────────────
+
+let slices = [];      // array of slice objects
+let nextSliceId = 1;
+let parsedFilters = {}; // type → [{id, text, selectionType}]
+
+// ─── URL Parsing ──────────────────────────────────────────────────────────────
+
+function parseNavURL(raw) {
+  raw = raw.trim();
+  let queryStr = '';
+  try {
+    const u = new URL(raw);
+    queryStr = u.searchParams.get('query') || '';
+  } catch (e) {
+    throw new Error('Invalid URL');
+  }
+  if (!queryStr) throw new Error('No query parameter found in URL');
+
+  // Remove recentSearchParam
+  const base = raw.split('?')[0];
+
+  // Parse filters from query string
+  // Format: (type:TYPENAME,values:List((id:X,text:Y,selectionType:INCLUDED)))
+  const filters = {};
+  const filterRe = /\(type:([A-Z_]+),values:List\(([^)]*(?:\([^)]*\)[^)]*)*)\)\)/g;
+
+  // Better approach: find each (type:...,values:List(...)) block
+  // We'll use a stateful parser
+  const typeRe = /\(type:([A-Z_]+),values:List\(/g;
+  let m;
+  while ((m = typeRe.exec(queryStr)) !== null) {
+    const typeName = m[1];
+    const listStart = m.index + m[0].length;
+    // Find matching closing paren for the List(
+    let depth = 1;
+    let i = listStart;
+    while (i < queryStr.length && depth > 0) {
+      if (queryStr[i] === '(') depth++;
+      else if (queryStr[i] === ')') depth--;
+      i++;
+    }
+    // content between List( and its matching )
+    const listContent = queryStr.slice(listStart, i - 1);
+    // Parse individual value entries: (id:X,text:Y,selectionType:Z)
+    const values = [];
+    const valRe = /\(id:([^,]+),text:([^,)]+),selectionType:([^)]+)\)/g;
+    let vm;
+    while ((vm = valRe.exec(listContent)) !== null) {
+      values.push({ id: vm[1], text: decodeURIComponent(vm[2].replace(/\+/g, ' ')), selectionType: vm[3] });
+    }
+    filters[typeName] = values;
+  }
+
+  return { base, filters };
+}
+
+// ─── URL Building ─────────────────────────────────────────────────────────────
+
+function buildFilterStr(type, values) {
+  const vStr = values.map(v => `(id:${v.id},text:${v.text},selectionType:${v.selectionType || 'INCLUDED'})`).join(',');
+  return `(type:${type},values:List(${vStr}))`;
+}
+
+function buildURL(filterMap) {
+  const parts = Object.entries(filterMap).map(([type, vals]) => buildFilterStr(type, vals));
+  const query = encodeURIComponent(parts.join(','));
+  return `https://www.linkedin.com/sales/search/people?query=${query}&viewAllFilters=true`;
+}
+
+// ─── Slicing Logic ────────────────────────────────────────────────────────────
+
+function makeId() { return nextSliceId++; }
+
+function cartesian(arrays) {
+  if (arrays.length === 0) return [[]];
+  return arrays.reduce((acc, arr) =>
+    acc.flatMap(prev => arr.map(item => [...prev, item])), [[]]);
+}
+
+function makeYACValues(ids, sourceVals) {
+  // Use parsed text if available, else fallback to YAC_TEXT
+  return ids.map(id => {
+    const found = (sourceVals || []).find(v => String(v.id) === String(id));
+    return { id: String(id), text: found ? found.text : (YAC_TEXT[id] || String(id)), selectionType: 'INCLUDED' };
+  });
+}
+
+function makeYIPValues(ids, sourceVals) {
+  return ids.map(id => {
+    const found = (sourceVals || []).find(v => String(v.id) === String(id));
+    return { id: String(id), text: found ? found.text : (YIP_TEXT[id] || String(id)), selectionType: 'INCLUDED' };
+  });
+}
+
+function createInitialSlices(filters) {
+  // Fixed dims: if multiple values → cartesian; if single → fixed in all
+  const fixedMulti   = {}; // dims with multiple values → split
+  const fixedSingle  = {}; // dims with single value → always carry
+
+  for (const dim of FIXED_DIMS) {
+    if (filters[dim] && filters[dim].length > 0) {
+      if (filters[dim].length > 1) {
+        fixedMulti[dim] = filters[dim];
+      } else {
+        fixedSingle[dim] = filters[dim];
+      }
+    }
+  }
+
+  const yacSource = filters[FILTER_TYPE_YAC] || [];
+
+  // Build cartesian product of multi-value fixed dims
+  const multiDims  = Object.keys(fixedMulti);
+  const multiArrays = multiDims.map(d => fixedMulti[d].map(v => ({ dim: d, val: v })));
+  const combos = multiArrays.length > 0 ? cartesian(multiArrays) : [[]];
+
+  const result = [];
+  let pid = makeId(); // shared parent id for this slice group
+
+  for (const yacBucket of YEARS_AT_COMPANY_BUCKETS) {
+    for (const combo of combos) {
+      const filterMap = { ...fixedSingle };
+      for (const { dim, val } of combo) {
+        filterMap[dim] = [val];
+      }
+      filterMap[FILTER_TYPE_YAC] = makeYACValues(yacBucket.ids, yacSource);
+
+      result.push({
+        id: makeId(),
+        pid,
+        depth: 0,
+        filterMap,
+        yacIds: yacBucket.ids,
+        yipIds: null,
+        count: null,
+        url: buildURL(filterMap),
+        // For display
+        fixedCombo: combo.map(c => c.val.text),
+        yacBucketLabel: yacBucket.label,
+        yipBucketLabel: null,
+      });
+    }
+  }
+
+  return result;
+}
+
+function resliceSlice(slice) {
+  if (slice.depth >= 2) return [];
+
+  const newSlices = [];
+  const pid = makeId();
+
+  if (slice.depth === 0) {
+    // Split by YEARS_IN_CURRENT_POSITION (3 buckets), keep YAC fixed
+    const yipSource = parsedFilters[FILTER_TYPE_YIP] || [];
+    for (const yipBucket of YEARS_IN_POSITION_BUCKETS) {
+      const fm = { ...slice.filterMap };
+      fm[FILTER_TYPE_YIP] = makeYIPValues(yipBucket.ids, yipSource);
+      newSlices.push({
+        id: makeId(),
+        pid,
+        depth: 1,
+        filterMap: fm,
+        yacIds: slice.yacIds,
+        yipIds: yipBucket.ids,
+        count: null,
+        url: buildURL(fm),
+        fixedCombo: slice.fixedCombo,
+        yacBucketLabel: slice.yacBucketLabel,
+        yipBucketLabel: yipBucket.label,
+      });
+    }
+  } else if (slice.depth === 1) {
+    // Split into individual year buckets: 5 YAC × 5 YIP
+    const yacSource = parsedFilters[FILTER_TYPE_YAC] || [];
+    const yipSource = parsedFilters[FILTER_TYPE_YIP] || [];
+    for (const yacY of YEAR_INDIVIDUAL) {
+      for (const yipY of YEAR_INDIVIDUAL) {
+        const fm = { ...slice.filterMap };
+        fm[FILTER_TYPE_YAC] = makeYACValues([yacY.id], yacSource);
+        fm[FILTER_TYPE_YIP] = makeYIPValues([yipY.id], yipSource);
+        newSlices.push({
+          id: makeId(),
+          pid,
+          depth: 2,
+          filterMap: fm,
+          yacIds: [yacY.id],
+          yipIds: [yipY.id],
+          count: null,
+          url: buildURL(fm),
+          fixedCombo: slice.fixedCombo,
+          yacBucketLabel: `YAC: ${yacY.label}`,
+          yipBucketLabel: `YIP: ${yipY.label}`,
+        });
+      }
+    }
+  }
+
+  return newSlices;
+}
+
+// ─── Merge Logic ──────────────────────────────────────────────────────────────
+
+function canMerge(prev, curr) {
+  if (!prev || !curr) return false;
+  if (prev.pid !== curr.pid) return false;
+  if (prev.count === null || curr.count === null) return false;
+  if ((prev.count + curr.count) > 2500) return false;
+  return true;
+}
+
+function mergeSlices(prevIdx, currIdx) {
+  const prev = slices[prevIdx];
+  const curr = slices[currIdx];
+
+  // Combine year filter values
+  const mergedFM = { ...prev.filterMap };
+
+  // Merge YAC
+  const prevYAC = mergedFM[FILTER_TYPE_YAC] || [];
+  const currYAC = curr.filterMap[FILTER_TYPE_YAC] || [];
+  const combinedYAC = [...prevYAC];
+  for (const v of currYAC) {
+    if (!combinedYAC.find(x => x.id === v.id)) combinedYAC.push(v);
+  }
+  mergedFM[FILTER_TYPE_YAC] = combinedYAC;
+
+  // Merge YIP if present
+  if (curr.filterMap[FILTER_TYPE_YIP]) {
+    const prevYIP = mergedFM[FILTER_TYPE_YIP] || [];
+    const currYIP = curr.filterMap[FILTER_TYPE_YIP] || [];
+    const combinedYIP = [...prevYIP];
+    for (const v of currYIP) {
+      if (!combinedYIP.find(x => x.id === v.id)) combinedYIP.push(v);
+    }
+    mergedFM[FILTER_TYPE_YIP] = combinedYIP;
+  }
+
+  const merged = {
+    id: prev.id,
+    pid: prev.pid,
+    depth: prev.depth,
+    filterMap: mergedFM,
+    yacIds: [...(prev.yacIds || []), ...(curr.yacIds || [])],
+    yipIds: prev.yipIds ? [...(prev.yipIds || []), ...(curr.yipIds || [])] : null,
+    count: prev.count + curr.count,
+    url: buildURL(mergedFM),
+    fixedCombo: prev.fixedCombo,
+    yacBucketLabel: prev.yacBucketLabel + ' + ' + curr.yacBucketLabel,
+    yipBucketLabel: prev.yipBucketLabel
+      ? prev.yipBucketLabel + ' + ' + (curr.yipBucketLabel || '')
+      : null,
+  };
+
+  slices.splice(prevIdx, 2, merged);
+  renderTable();
+  updateStats();
+}
+
+// ─── Status Helpers ───────────────────────────────────────────────────────────
+
+function getStatus(slice) {
+  if (slice.count === null) return 'pending';
+  if (slice.count > 2500)  return 'overlimit';
+  return 'verified';
+}
+
+// ─── Render ───────────────────────────────────────────────────────────────────
+
+function renderTags(slice) {
+  let html = '';
+
+  // Fixed combo tags (grey)
+  for (const v of (slice.fixedCombo || [])) {
+    html += `<span class="tag tag-grey">${escHtml(v)}</span> `;
+  }
+
+  // YAC tag (blue)
+  if (slice.yacBucketLabel) {
+    html += `<span class="tag tag-blue">${escHtml(slice.yacBucketLabel)}</span> `;
+  }
+
+  // YIP tag (amber)
+  if (slice.yipBucketLabel) {
+    html += `<span class="tag tag-amber">${escHtml(slice.yipBucketLabel)}</span> `;
+  }
+
+  return html;
+}
+
+function renderStatusBadge(slice) {
+  const s = getStatus(slice);
+  if (s === 'pending')   return `<span class="status-badge status-pending">— pending</span>`;
+  if (s === 'verified')  return `<span class="status-badge status-verified">✓ verified</span>`;
+  if (s === 'overlimit') return `<span class="status-badge status-overlimit">⚠ over limit</span>`;
+}
+
+function renderActions(slice, idx) {
+  let html = '<div class="actions-cell">';
+  const s = getStatus(slice);
+
+  // Re-slice button if over limit and depth < 2
+  if (s === 'overlimit' && slice.depth < 2) {
+    html += `<button class="btn btn-sm btn-reslice" onclick="doReslice(${idx})">Re-slice</button>`;
+  }
+
+  // Merge button: only if idx > 0 and eligible
+  if (idx > 0 && canMerge(slices[idx - 1], slice)) {
+    html += `<button class="btn btn-sm btn-merge" onclick="doMerge(${idx})">↑ Merge with previous</button>`;
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function renderTable() {
+  const tbody = document.getElementById('slicesTbody');
+  if (slices.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="es-icon">✂️</div><p>No slices yet. Paste a URL and click Slice.</p></div></td></tr>`;
+    return;
+  }
+
+  let rows = '';
+  slices.forEach((slice, idx) => {
+    const countVal = slice.count !== null ? slice.count : '';
+    rows += `
+      <tr id="row-${slice.id}">
+        <td class="col-num">${idx + 1}</td>
+        <td class="col-filters">${renderTags(slice)}</td>
+        <td class="col-open"><a class="open-link" href="${escHtml(slice.url)}" target="_blank" rel="noopener">Open ↗</a></td>
+        <td class="col-count"><input class="count-input" type="number" min="0" value="${countVal}" placeholder="—" data-idx="${idx}" onchange="updateCount(this)" /></td>
+        <td class="col-status">${renderStatusBadge(slice)}</td>
+        <td class="col-actions">${renderActions(slice, idx)}</td>
+      </tr>`;
+  });
+  tbody.innerHTML = rows;
+}
+
+function renderFiltersCard(filters) {
+  const grid = document.getElementById('filterGrid');
+  const card = document.getElementById('filtersCard');
+
+  const dimLabels = {
+    COMPANY_HEADQUARTERS: 'Company HQ',
+    COMPANY_HEADCOUNT:    'Company Headcount',
+    CURRENT_TITLE:        'Current Title',
+    INDUSTRY:             'Industry',
+    [FILTER_TYPE_YAC]:    'Years at Company',
+    [FILTER_TYPE_YIP]:    'Years in Position',
+  };
+
+  const shown = [...FIXED_DIMS, FILTER_TYPE_YAC, FILTER_TYPE_YIP];
+  let html = '';
+  let hasAny = false;
+
+  for (const dim of shown) {
+    if (!filters[dim] || filters[dim].length === 0) continue;
+    hasAny = true;
+    const label = dimLabels[dim] || dim;
+    const tagClass = dim === FILTER_TYPE_YAC ? 'tag-blue' : dim === FILTER_TYPE_YIP ? 'tag-amber' : 'tag-grey';
+    const vals = filters[dim].map(v => `<span class="tag ${tagClass}">${escHtml(v.text)}</span>`).join(' ');
+    html += `<div class="filter-item"><div class="fi-label">${label}</div><div class="fi-values">${vals}</div></div>`;
+  }
+
+  if (!hasAny) {
+    card.classList.add('hidden');
+    return;
+  }
+  grid.innerHTML = html;
+  card.classList.remove('hidden');
+}
+
+// ─── Stats ────────────────────────────────────────────────────────────────────
+
+function updateStats() {
+  const total     = slices.length;
+  const verified  = slices.filter(s => getStatus(s) === 'verified').length;
+  const overlimit = slices.filter(s => getStatus(s) === 'overlimit').length;
+  const pending   = slices.filter(s => getStatus(s) === 'pending').length;
+
+  document.getElementById('statTotal').textContent    = total;
+  document.getElementById('statVerified').textContent  = verified;
+  document.getElementById('statOverlimit').textContent = overlimit;
+  document.getElementById('statPending').textContent   = pending;
+}
+
+// ─── Event Handlers ───────────────────────────────────────────────────────────
+
+function updateCount(input) {
+  const idx = parseInt(input.dataset.idx, 10);
+  const val = input.value.trim();
+  slices[idx].count = val === '' ? null : parseInt(val, 10);
+  // Re-render just status + actions cells to avoid losing focus
+  renderTable();
+  updateStats();
+}
+
+function doReslice(idx) {
+  const slice = slices[idx];
+  const newSlices = resliceSlice(slice);
+  if (newSlices.length === 0) return;
+  slices.splice(idx, 1, ...newSlices);
+  renderTable();
+  updateStats();
+}
+
+function doMerge(currIdx) {
+  mergeSlices(currIdx - 1, currIdx);
+}
+
+function sliceURL() {
+  const raw = document.getElementById('urlInput').value.trim();
+  hideError();
+  if (!raw) { showError('Please paste a Sales Navigator URL.'); return; }
+
+  let parsed;
+  try {
+    parsed = parseNavURL(raw);
+  } catch (e) {
+    showError(e.message);
+    return;
+  }
+
+  parsedFilters = parsed.filters;
+  nextSliceId = 1;
+  slices = createInitialSlices(parsedFilters);
+
+  renderFiltersCard(parsedFilters);
+  renderTable();
+  updateStats();
+
+  document.getElementById('statsBar').classList.remove('hidden');
+  document.getElementById('tableSection').classList.remove('hidden');
+  document.getElementById('emptyState').classList.add('hidden');
+}
+
+function resetAll() {
+  slices = [];
+  parsedFilters = {};
+  nextSliceId = 1;
+  document.getElementById('urlInput').value = '';
+  document.getElementById('filtersCard').classList.add('hidden');
+  document.getElementById('statsBar').classList.add('hidden');
+  document.getElementById('tableSection').classList.add('hidden');
+  document.getElementById('emptyState').classList.add('hidden');
+  hideError();
+}
+
+function copyVerified() {
+  const verified = slices.filter(s => getStatus(s) === 'verified');
+  if (verified.length === 0) { alert('No verified slices yet.'); return; }
+  const urls = verified.map(s => s.url).join('\n');
+  navigator.clipboard.writeText(urls).then(() => {
+    alert(`Copied ${verified.length} verified URL(s) to clipboard.`);
+  }).catch(() => {
+    // Fallback
+    const ta = document.createElement('textarea');
+    ta.value = urls;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    alert(`Copied ${verified.length} verified URL(s) to clipboard.`);
+  });
+}
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+
+function escHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function showError(msg) {
+  const el = document.getElementById('errorMsg');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+function hideError() {
+  document.getElementById('errorMsg').classList.add('hidden');
+}
+
+// Allow pressing Enter in the URL input
+document.getElementById('urlInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') sliceURL();
+});
+</script>
+</body>
+</html>
