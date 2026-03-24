@@ -91,6 +91,7 @@
   .tag-amber  { background: #fef3c7; color: #92400e; }
   .tag-grey   { background: #e5e7eb; color: #374151; }
   .tag-green  { background: #d1fae5; color: #065f46; }
+  .tag-red    { background: #fee2e2; color: #991b1b; }
 
   /* Stats bar */
   .stats-bar {
@@ -360,35 +361,48 @@ function makeYIPValues(ids, sourceVals) {
 }
 
 function createInitialSlices(filters) {
-  // Fixed dims: if multiple values → cartesian; if single → fixed in all
-  const fixedMulti   = {}; // dims with multiple values → split
-  const fixedSingle  = {}; // dims with single value → always carry
+  // Pass through any filter that isn't a FIXED_DIM, YAC, or YIP unchanged into every slice
+  const passthrough = {};
+  for (const [type, vals] of Object.entries(filters)) {
+    if (!FIXED_DIMS.includes(type) && type !== FILTER_TYPE_YAC && type !== FILTER_TYPE_YIP) {
+      passthrough[type] = vals;
+    }
+  }
+
+  // For each FIXED_DIM, split only on INCLUDED values; EXCLUDED values ride along in every slice
+  const alwaysCarry   = {}; // dims carried wholesale (0 or 1 INCLUDED value, or all-excluded)
+  const splitIncluded = {}; // dim → INCLUDED values to cartesian-product over
+  const splitExcluded = {}; // dim → EXCLUDED values to append to every split slice
 
   for (const dim of FIXED_DIMS) {
-    if (filters[dim] && filters[dim].length > 0) {
-      if (filters[dim].length > 1) {
-        fixedMulti[dim] = filters[dim];
-      } else {
-        fixedSingle[dim] = filters[dim];
-      }
+    if (!filters[dim] || filters[dim].length === 0) continue;
+    const included = filters[dim].filter(v => v.selectionType === 'INCLUDED');
+    const excluded = filters[dim].filter(v => v.selectionType !== 'INCLUDED');
+
+    if (included.length > 1) {
+      splitIncluded[dim] = included;
+      if (excluded.length > 0) splitExcluded[dim] = excluded;
+    } else {
+      alwaysCarry[dim] = filters[dim]; // single-INCLUDED or purely-excluded dim
     }
   }
 
   const yacSource = filters[FILTER_TYPE_YAC] || [];
 
-  // Build cartesian product of multi-value fixed dims
-  const multiDims  = Object.keys(fixedMulti);
-  const multiArrays = multiDims.map(d => fixedMulti[d].map(v => ({ dim: d, val: v })));
+  // Cartesian product over INCLUDED values only
+  const multiDims   = Object.keys(splitIncluded);
+  const multiArrays = multiDims.map(d => splitIncluded[d].map(v => ({ dim: d, val: v })));
   const combos = multiArrays.length > 0 ? cartesian(multiArrays) : [[]];
 
   const result = [];
-  let pid = makeId(); // shared parent id for this slice group
+  const pid = makeId();
 
   for (const yacBucket of YEARS_AT_COMPANY_BUCKETS) {
     for (const combo of combos) {
-      const filterMap = { ...fixedSingle };
+      const filterMap = { ...passthrough, ...alwaysCarry };
       for (const { dim, val } of combo) {
-        filterMap[dim] = [val];
+        // One INCLUDED value + all EXCLUDED values for that dim
+        filterMap[dim] = splitExcluded[dim] ? [val, ...splitExcluded[dim]] : [val];
       }
       filterMap[FILTER_TYPE_YAC] = makeYACValues(yacBucket.ids, yacSource);
 
@@ -401,7 +415,6 @@ function createInitialSlices(filters) {
         yipIds: null,
         count: null,
         url: buildURL(filterMap),
-        // For display
         fixedCombo: combo.map(c => c.val.text),
         yacBucketLabel: yacBucket.label,
         yipBucketLabel: null,
@@ -623,21 +636,24 @@ function renderFiltersCard(filters) {
     COMPANY_HEADCOUNT:    'Company Headcount',
     CURRENT_TITLE:        'Current Title',
     INDUSTRY:             'Industry',
+    REGION:               'Geography (Personal)',
     [FILTER_TYPE_YAC]:    'Years at Company',
     [FILTER_TYPE_YIP]:    'Years in Position',
   };
 
-  const shown = [...FIXED_DIMS, FILTER_TYPE_YAC, FILTER_TYPE_YIP];
   let html = '';
   let hasAny = false;
 
-  for (const dim of shown) {
-    if (!filters[dim] || filters[dim].length === 0) continue;
+  for (const [dim, vals] of Object.entries(filters)) {
+    if (!vals || vals.length === 0) continue;
     hasAny = true;
     const label = dimLabels[dim] || dim;
-    const tagClass = dim === FILTER_TYPE_YAC ? 'tag-blue' : dim === FILTER_TYPE_YIP ? 'tag-amber' : 'tag-grey';
-    const vals = filters[dim].map(v => `<span class="tag ${tagClass}">${escHtml(v.text)}</span>`).join(' ');
-    html += `<div class="filter-item"><div class="fi-label">${label}</div><div class="fi-values">${vals}</div></div>`;
+    const baseClass = dim === FILTER_TYPE_YAC ? 'tag-blue' : dim === FILTER_TYPE_YIP ? 'tag-amber' : 'tag-grey';
+    const valTags = vals.map(v => {
+      const cls = v.selectionType === 'EXCLUDED' ? 'tag-red' : baseClass;
+      return `<span class="tag ${cls}">${escHtml(v.text)}</span>`;
+    }).join(' ');
+    html += `<div class="filter-item"><div class="fi-label">${label}</div><div class="fi-values">${valTags}</div></div>`;
   }
 
   if (!hasAny) {
