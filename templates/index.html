@@ -367,74 +367,36 @@ function makeYIPValues(ids, sourceVals) {
 
 function createInitialSlices(filters) {
   // Pass through any filter that isn't a FIXED_DIM, YAC, or YIP unchanged into every slice
-  const passthrough = {};
+  // All filters except YAC/YIP travel unchanged in every initial slice.
+  // Only YAC varies — the other dimensions define the search, not the segmentation.
+  const baseFilterMap = {};
   for (const [type, vals] of Object.entries(filters)) {
-    if (!FIXED_DIMS.includes(type) && type !== FILTER_TYPE_YAC && type !== FILTER_TYPE_YIP) {
-      passthrough[type] = vals;
-    }
-  }
-
-  // For each FIXED_DIM, split only on INCLUDED values; EXCLUDED values ride along in every slice
-  const alwaysCarry   = {}; // dims carried wholesale (0 or 1 INCLUDED value, or all-excluded)
-  const splitIncluded = {}; // dim → INCLUDED values to cartesian-product over
-  const splitExcluded = {}; // dim → EXCLUDED values to append to every split slice
-
-  for (const dim of FIXED_DIMS) {
-    if (!filters[dim] || filters[dim].length === 0) continue;
-
-    // CURRENT_TITLE is never split in initial slicing — it travels whole and
-    // is only split as the final re-slice level when all other splits are exhausted.
-    if (dim === FILTER_TYPE_TITLE) {
-      alwaysCarry[dim] = filters[dim];
-      continue;
-    }
-
-    const included = filters[dim].filter(v => v.selectionType === 'INCLUDED');
-    const excluded = filters[dim].filter(v => v.selectionType !== 'INCLUDED');
-
-    if (included.length > 1) {
-      splitIncluded[dim] = included;
-      if (excluded.length > 0) splitExcluded[dim] = excluded;
-    } else {
-      alwaysCarry[dim] = filters[dim]; // single-INCLUDED or purely-excluded dim
+    if (type !== FILTER_TYPE_YAC && type !== FILTER_TYPE_YIP) {
+      baseFilterMap[type] = vals;
     }
   }
 
   const yacSource = filters[FILTER_TYPE_YAC] || [];
-
-  // Cartesian product over INCLUDED values only
-  const multiDims   = Object.keys(splitIncluded);
-  const multiArrays = multiDims.map(d => splitIncluded[d].map(v => ({ dim: d, val: v })));
-  const combos = multiArrays.length > 0 ? cartesian(multiArrays) : [[]];
-
   const result = [];
   const pid = makeId();
 
   for (const yacBucket of YEARS_AT_COMPANY_BUCKETS) {
-    for (const combo of combos) {
-      const filterMap = { ...passthrough, ...alwaysCarry };
-      for (const { dim, val } of combo) {
-        // One INCLUDED value + all EXCLUDED values for that dim
-        filterMap[dim] = splitExcluded[dim] ? [val, ...splitExcluded[dim]] : [val];
-      }
-      filterMap[FILTER_TYPE_YAC] = makeYACValues(yacBucket.ids, yacSource);
-
-      result.push({
-        id: makeId(),
-        pid,
-        depth: 0,
-        filterMap,
-        yacIds: yacBucket.ids,
-        yipIds: null,
-        titleGroupIdx: null,
-        titleGroupLabel: null,
-        count: null,
-        url: buildURL(filterMap),
-        fixedCombo: combo.map(c => c.val.text),
-        yacBucketLabel: yacBucket.label,
-        yipBucketLabel: null,
-      });
-    }
+    const filterMap = { ...baseFilterMap, [FILTER_TYPE_YAC]: makeYACValues(yacBucket.ids, yacSource) };
+    result.push({
+      id: makeId(),
+      pid,
+      depth: 0,
+      filterMap,
+      yacIds: yacBucket.ids,
+      yipIds: null,
+      titleGroupIdx: null,
+      titleGroupLabel: null,
+      count: null,
+      url: buildURL(filterMap),
+      fixedCombo: [],
+      yacBucketLabel: yacBucket.label,
+      yipBucketLabel: null,
+    });
   }
 
   return result;
