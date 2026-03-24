@@ -260,6 +260,11 @@ const FIXED_DIMS = ['COMPANY_HEADQUARTERS', 'COMPANY_HEADCOUNT', 'CURRENT_TITLE'
 
 const FILTER_TYPE_YAC = 'YEARS_AT_CURRENT_COMPANY';
 const FILTER_TYPE_YIP = 'YEARS_IN_CURRENT_POSITION';
+const FILTER_TYPE_TITLE = 'CURRENT_TITLE';
+
+// Title split groups — text matched case-insensitively (exact)
+// Group 1: founder / owner types. Group 2: everything else.
+const TITLE_GROUP_1_TEXTS = ['founder', 'owner'];
 
 // id → display text maps (best-effort labels)
 const YAC_TEXT = { 1: 'Less than 1 year', 2: '1 to 2 years', 3: '3 to 5 years', 4: '6 to 10 years', 5: 'More than 10 years' };
@@ -376,6 +381,14 @@ function createInitialSlices(filters) {
 
   for (const dim of FIXED_DIMS) {
     if (!filters[dim] || filters[dim].length === 0) continue;
+
+    // CURRENT_TITLE is never split in initial slicing — it travels whole and
+    // is only split as the final re-slice level when all other splits are exhausted.
+    if (dim === FILTER_TYPE_TITLE) {
+      alwaysCarry[dim] = filters[dim];
+      continue;
+    }
+
     const included = filters[dim].filter(v => v.selectionType === 'INCLUDED');
     const excluded = filters[dim].filter(v => v.selectionType !== 'INCLUDED');
 
@@ -413,6 +426,8 @@ function createInitialSlices(filters) {
         filterMap,
         yacIds: yacBucket.ids,
         yipIds: null,
+        titleGroupIdx: null,
+        titleGroupLabel: null,
         count: null,
         url: buildURL(filterMap),
         fixedCombo: combo.map(c => c.val.text),
@@ -425,10 +440,20 @@ function createInitialSlices(filters) {
   return result;
 }
 
+function canSplitTitle(slice) {
+  const titleVals = slice.filterMap[FILTER_TYPE_TITLE] || [];
+  const included = titleVals.filter(v => v.selectionType === 'INCLUDED');
+  const g1 = included.filter(v => TITLE_GROUP_1_TEXTS.includes(v.text.toLowerCase()));
+  const g2 = included.filter(v => !TITLE_GROUP_1_TEXTS.includes(v.text.toLowerCase()));
+  return g1.length > 0 && g2.length > 0;
+}
+
 function canResliceFurther(slice) {
   const yipIsIndividual = slice.yipIds !== null && slice.yipIds.length === 1;
   const yacIsIndividual = slice.yacIds.length === 1;
-  return !(yipIsIndividual && yacIsIndividual);
+  if (!yipIsIndividual || !yacIsIndividual) return true;
+  // Both YAC and YIP are individual — last resort is title split
+  return slice.titleGroupIdx === null && canSplitTitle(slice);
 }
 
 function resliceSlice(slice) {
@@ -440,6 +465,10 @@ function resliceSlice(slice) {
 
   const yipIsNull = slice.yipIds === null;
   const yipIsIndividual = !yipIsNull && slice.yipIds.length === 1;
+  const yacIsIndividual = slice.yacIds.length === 1;
+
+  // Shorthand to carry title state from parent into a child push
+  const titleCarry = { titleGroupIdx: slice.titleGroupIdx, titleGroupLabel: slice.titleGroupLabel };
 
   if (yipIsNull) {
     // No YIP filter yet — split into 3 YIP buckets, keep YAC fixed
@@ -449,7 +478,7 @@ function resliceSlice(slice) {
       fm[FILTER_TYPE_YIP] = makeYIPValues(yipBucket.ids, yipSource);
       newSlices.push({
         id: makeId(), pid, depth: nextDepth, filterMap: fm,
-        yacIds: slice.yacIds, yipIds: yipBucket.ids, count: null,
+        yacIds: slice.yacIds, yipIds: yipBucket.ids, ...titleCarry, count: null,
         url: buildURL(fm), fixedCombo: slice.fixedCombo,
         yacBucketLabel: slice.yacBucketLabel, yipBucketLabel: yipBucket.label,
       });
@@ -462,13 +491,13 @@ function resliceSlice(slice) {
       fm[FILTER_TYPE_YIP] = makeYIPValues([yipY.id], yipSource);
       newSlices.push({
         id: makeId(), pid, depth: nextDepth, filterMap: fm,
-        yacIds: slice.yacIds, yipIds: [yipY.id], count: null,
+        yacIds: slice.yacIds, yipIds: [yipY.id], ...titleCarry, count: null,
         url: buildURL(fm), fixedCombo: slice.fixedCombo,
         yacBucketLabel: slice.yacBucketLabel, yipBucketLabel: `YIP: ${yipY.label}`,
       });
     }
-  } else {
-    // YIP is already individual — split YAC into its individual ids, keep YIP fixed
+  } else if (!yacIsIndividual) {
+    // YIP is individual, YAC is not — split YAC into its individual ids, keep YIP fixed
     const yacSource = parsedFilters[FILTER_TYPE_YAC] || [];
     for (const yacId of slice.yacIds) {
       const fm = { ...slice.filterMap };
@@ -476,10 +505,32 @@ function resliceSlice(slice) {
       const yacIndiv = YEAR_INDIVIDUAL.find(y => y.id === yacId);
       newSlices.push({
         id: makeId(), pid, depth: nextDepth, filterMap: fm,
-        yacIds: [yacId], yipIds: slice.yipIds, count: null,
+        yacIds: [yacId], yipIds: slice.yipIds, ...titleCarry, count: null,
         url: buildURL(fm), fixedCombo: slice.fixedCombo,
         yacBucketLabel: `YAC: ${yacIndiv ? yacIndiv.label : yacId}`,
         yipBucketLabel: slice.yipBucketLabel,
+      });
+    }
+  } else {
+    // Both YAC and YIP are individual — last resort: split CURRENT_TITLE into 2 groups
+    const titleVals = slice.filterMap[FILTER_TYPE_TITLE] || [];
+    const included = titleVals.filter(v => v.selectionType === 'INCLUDED');
+    const excluded = titleVals.filter(v => v.selectionType !== 'INCLUDED');
+    const g1Inc = included.filter(v => TITLE_GROUP_1_TEXTS.includes(v.text.toLowerCase()));
+    const g2Inc = included.filter(v => !TITLE_GROUP_1_TEXTS.includes(v.text.toLowerCase()));
+    const groups = [
+      { idx: 1, inc: g1Inc, label: 'Titles: Founder/Owner' },
+      { idx: 2, inc: g2Inc, label: 'Titles: Others' },
+    ];
+    for (const g of groups) {
+      const fm = { ...slice.filterMap };
+      fm[FILTER_TYPE_TITLE] = [...g.inc, ...excluded];
+      newSlices.push({
+        id: makeId(), pid, depth: nextDepth, filterMap: fm,
+        yacIds: slice.yacIds, yipIds: slice.yipIds,
+        titleGroupIdx: g.idx, titleGroupLabel: g.label,
+        count: null, url: buildURL(fm), fixedCombo: slice.fixedCombo,
+        yacBucketLabel: slice.yacBucketLabel, yipBucketLabel: slice.yipBucketLabel,
       });
     }
   }
@@ -571,6 +622,11 @@ function renderTags(slice) {
   // YIP tag (amber)
   if (slice.yipBucketLabel) {
     html += `<span class="tag tag-amber">${escHtml(slice.yipBucketLabel)}</span> `;
+  }
+
+  // Title group tag (green) — only shown after title split
+  if (slice.titleGroupLabel) {
+    html += `<span class="tag tag-green">${escHtml(slice.titleGroupLabel)}</span> `;
   }
 
   return html;
