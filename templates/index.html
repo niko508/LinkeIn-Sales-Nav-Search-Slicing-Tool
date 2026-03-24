@@ -92,6 +92,8 @@
   .tag-grey   { background: #e5e7eb; color: #374151; }
   .tag-green  { background: #d1fae5; color: #065f46; }
   .tag-red    { background: #fee2e2; color: #991b1b; }
+  .tag-purple { background: #ede9fe; color: #5b21b6; }
+  .tag-orange { background: #ffedd5; color: #9a3412; }
 
   /* Stats bar */
   .stats-bar {
@@ -236,39 +238,24 @@
 <script>
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const YEARS_AT_COMPANY_BUCKETS = [
-  { label: 'YAC: <1yr–2yrs', ids: [1, 2] },
-  { label: 'YAC: 3–5yrs',    ids: [3]    },
-  { label: 'YAC: 6–10yrs+',  ids: [4, 5] },
+const FILTER_TYPE_HEADCOUNT = 'COMPANY_HEADCOUNT';
+const FILTER_TYPE_HQ        = 'COMPANY_HEADQUARTERS';
+const FILTER_TYPE_TITLE     = 'CURRENT_TITLE';
+const FILTER_TYPE_INDUSTRY  = 'INDUSTRY';
+const FILTER_TYPE_FOLLOWER  = 'FOLLOWER_COUNT';
+
+// Follower count buckets (LinkedIn Sales Nav standard IDs)
+const FOLLOWER_BUCKETS = [
+  { label: 'Followers: 1–500',  id: 'A' },
+  { label: 'Followers: 501–1k', id: 'B' },
+  { label: 'Followers: 1k–5k',  id: 'C' },
+  { label: 'Followers: 5k–10k', id: 'D' },
+  { label: 'Followers: 10k+',   id: 'E' },
 ];
 
-const YEARS_IN_POSITION_BUCKETS = [
-  { label: 'YIP: <1yr–2yrs', ids: [1, 2] },
-  { label: 'YIP: 3–5yrs',    ids: [3]    },
-  { label: 'YIP: 6–10yrs+',  ids: [4, 5] },
-];
-
-const YEAR_INDIVIDUAL = [
-  { label: '<1yr',  id: 1 },
-  { label: '1-2yr', id: 2 },
-  { label: '3-5yr', id: 3 },
-  { label: '6-10yr',id: 4 },
-  { label: '10+yr', id: 5 },
-];
-
-const FIXED_DIMS = ['COMPANY_HEADQUARTERS', 'COMPANY_HEADCOUNT', 'CURRENT_TITLE', 'INDUSTRY'];
-
-const FILTER_TYPE_YAC = 'YEARS_AT_CURRENT_COMPANY';
-const FILTER_TYPE_YIP = 'YEARS_IN_CURRENT_POSITION';
-const FILTER_TYPE_TITLE = 'CURRENT_TITLE';
-
-// Title split groups — text matched case-insensitively (exact)
-// Group 1: founder / owner types. Group 2: everything else.
-const TITLE_GROUP_1_TEXTS = ['founder', 'owner'];
-
-// id → display text maps (best-effort labels)
-const YAC_TEXT = { 1: 'Less than 1 year', 2: '1 to 2 years', 3: '3 to 5 years', 4: '6 to 10 years', 5: 'More than 10 years' };
-const YIP_TEXT = { 1: 'Less than 1 year', 2: '1 to 2 years', 3: '3 to 5 years', 4: '6 to 10 years', 5: 'More than 10 years' };
+// Title split groups — matched case-insensitively (exact text)
+// Group 1: founder/owner/entrepreneur types. Group 2: executive types (CEO, MD, Principal…)
+const TITLE_GROUP_1_TEXTS = ['founder', 'co-founder', 'entrepreneur', 'owner'];
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -344,156 +331,140 @@ function buildURL(filterMap) {
 
 function makeId() { return nextSliceId++; }
 
-function cartesian(arrays) {
-  if (arrays.length === 0) return [[]];
-  return arrays.reduce((acc, arr) =>
-    acc.flatMap(prev => arr.map(item => [...prev, item])), [[]]);
-}
-
-function makeYACValues(ids, sourceVals) {
-  // Use parsed text if available, else fallback to YAC_TEXT
-  return ids.map(id => {
-    const found = (sourceVals || []).find(v => String(v.id) === String(id));
-    return { id: String(id), text: found ? found.text : (YAC_TEXT[id] || String(id)), selectionType: 'INCLUDED' };
-  });
-}
-
-function makeYIPValues(ids, sourceVals) {
-  return ids.map(id => {
-    const found = (sourceVals || []).find(v => String(v.id) === String(id));
-    return { id: String(id), text: found ? found.text : (YIP_TEXT[id] || String(id)), selectionType: 'INCLUDED' };
-  });
-}
 
 function createInitialSlices(filters) {
-  // Pass through any filter that isn't a FIXED_DIM, YAC, or YIP unchanged into every slice
-  // All filters except YAC/YIP travel unchanged in every initial slice.
-  // Only YAC varies — the other dimensions define the search, not the segmentation.
+  // Initial split: one slice per INCLUDED headcount value.
+  // All other filters travel whole into every slice.
+  const allHC      = filters[FILTER_TYPE_HEADCOUNT] || [];
+  const includedHC = allHC.filter(v => v.selectionType === 'INCLUDED');
+  const excludedHC = allHC.filter(v => v.selectionType !== 'INCLUDED');
+
   const baseFilterMap = {};
   for (const [type, vals] of Object.entries(filters)) {
-    if (type !== FILTER_TYPE_YAC && type !== FILTER_TYPE_YIP) {
-      baseFilterMap[type] = vals;
-    }
+    if (type !== FILTER_TYPE_HEADCOUNT) baseFilterMap[type] = vals;
   }
 
-  const yacSource = filters[FILTER_TYPE_YAC] || [];
-  const result = [];
   const pid = makeId();
+  const result = [];
 
-  for (const yacBucket of YEARS_AT_COMPANY_BUCKETS) {
-    const filterMap = { ...baseFilterMap, [FILTER_TYPE_YAC]: makeYACValues(yacBucket.ids, yacSource) };
+  const hcSlices = includedHC.length >= 2 ? includedHC : includedHC; // always iterate
+  const toSplit  = includedHC.length >= 2 ? includedHC : null;
+
+  if (!toSplit) {
+    // 0 or 1 INCLUDED headcount — single slice, no split needed
+    const fm = { ...baseFilterMap, [FILTER_TYPE_HEADCOUNT]: allHC };
     result.push({
-      id: makeId(),
-      pid,
-      depth: 0,
-      filterMap,
-      yacIds: yacBucket.ids,
-      yipIds: null,
-      titleGroupIdx: null,
-      titleGroupLabel: null,
-      count: null,
-      url: buildURL(filterMap),
-      fixedCombo: [],
-      yacBucketLabel: yacBucket.label,
-      yipBucketLabel: null,
+      id: makeId(), pid, depth: 0, filterMap: fm,
+      headcountIncluded: includedHC,
+      hqIncluded: null, titleGroupIdx: null, titleGroupLabel: null,
+      industryIncluded: null, followerBucket: null,
+      count: null, url: buildURL(fm),
     });
+  } else {
+    for (const hcVal of toSplit) {
+      const fm = { ...baseFilterMap, [FILTER_TYPE_HEADCOUNT]: [hcVal, ...excludedHC] };
+      result.push({
+        id: makeId(), pid, depth: 0, filterMap: fm,
+        headcountIncluded: [hcVal],
+        hqIncluded: null, titleGroupIdx: null, titleGroupLabel: null,
+        industryIncluded: null, followerBucket: null,
+        count: null, url: buildURL(fm),
+      });
+    }
   }
 
   return result;
 }
 
-function canSplitTitle(slice) {
-  const titleVals = slice.filterMap[FILTER_TYPE_TITLE] || [];
-  const included = titleVals.filter(v => v.selectionType === 'INCLUDED');
-  const g1 = included.filter(v => TITLE_GROUP_1_TEXTS.includes(v.text.toLowerCase()));
-  const g2 = included.filter(v => !TITLE_GROUP_1_TEXTS.includes(v.text.toLowerCase()));
+// ─── Re-slice helpers ─────────────────────────────────────────────────────────
+
+function _canSplitByHQ(slice) {
+  if (slice.hqIncluded !== null) return false;
+  return (parsedFilters[FILTER_TYPE_HQ] || []).filter(v => v.selectionType === 'INCLUDED').length >= 2;
+}
+
+function _canSplitByTitle(slice) {
+  if (slice.titleGroupIdx !== null) return false;
+  const inc = (slice.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType === 'INCLUDED');
+  const g1  = inc.filter(v => TITLE_GROUP_1_TEXTS.includes(v.text.toLowerCase()));
+  const g2  = inc.filter(v => !TITLE_GROUP_1_TEXTS.includes(v.text.toLowerCase()));
   return g1.length > 0 && g2.length > 0;
 }
 
+function _canSplitByIndustry(slice) {
+  if (slice.industryIncluded !== null) return false;
+  return (parsedFilters[FILTER_TYPE_INDUSTRY] || []).filter(v => v.selectionType === 'INCLUDED').length >= 2;
+}
+
 function canResliceFurther(slice) {
-  const yipIsIndividual = slice.yipIds !== null && slice.yipIds.length === 1;
-  const yacIsIndividual = slice.yacIds.length === 1;
-  if (!yipIsIndividual || !yacIsIndividual) return true;
-  // Both YAC and YIP are individual — last resort is title split
-  return slice.titleGroupIdx === null && canSplitTitle(slice);
+  return _canSplitByHQ(slice) || _canSplitByTitle(slice) ||
+         _canSplitByIndustry(slice) || slice.followerBucket === null;
 }
 
 function resliceSlice(slice) {
   if (!canResliceFurther(slice)) return [];
 
   const newSlices = [];
-  const pid = makeId();
-  const nextDepth = slice.depth + 1;
+  const pid       = makeId();
+  const nd        = slice.depth + 1;
 
-  const yipIsNull = slice.yipIds === null;
-  const yipIsIndividual = !yipIsNull && slice.yipIds.length === 1;
-  const yacIsIndividual = slice.yacIds.length === 1;
+  // Carry all tracking fields from parent; the active branch overrides its own field.
+  const base = {
+    headcountIncluded: slice.headcountIncluded,
+    hqIncluded:        slice.hqIncluded,
+    titleGroupIdx:     slice.titleGroupIdx,
+    titleGroupLabel:   slice.titleGroupLabel,
+    industryIncluded:  slice.industryIncluded,
+    followerBucket:    slice.followerBucket,
+  };
 
-  // Shorthand to carry title state from parent into a child push
-  const titleCarry = { titleGroupIdx: slice.titleGroupIdx, titleGroupLabel: slice.titleGroupLabel };
+  if (_canSplitByHQ(slice)) {
+    // Level 1 — split by INCLUDED Company HQ values
+    const allHQ  = parsedFilters[FILTER_TYPE_HQ] || [];
+    const incHQ  = allHQ.filter(v => v.selectionType === 'INCLUDED');
+    const excHQ  = allHQ.filter(v => v.selectionType !== 'INCLUDED');
+    for (const hqVal of incHQ) {
+      const fm = { ...slice.filterMap, [FILTER_TYPE_HQ]: [hqVal, ...excHQ] };
+      newSlices.push({ id: makeId(), pid, depth: nd, filterMap: fm,
+        ...base, hqIncluded: [hqVal], count: null, url: buildURL(fm) });
+    }
 
-  if (yipIsNull) {
-    // No YIP filter yet — split into 3 YIP buckets, keep YAC fixed
-    const yipSource = parsedFilters[FILTER_TYPE_YIP] || [];
-    for (const yipBucket of YEARS_IN_POSITION_BUCKETS) {
-      const fm = { ...slice.filterMap };
-      fm[FILTER_TYPE_YIP] = makeYIPValues(yipBucket.ids, yipSource);
-      newSlices.push({
-        id: makeId(), pid, depth: nextDepth, filterMap: fm,
-        yacIds: slice.yacIds, yipIds: yipBucket.ids, ...titleCarry, count: null,
-        url: buildURL(fm), fixedCombo: slice.fixedCombo,
-        yacBucketLabel: slice.yacBucketLabel, yipBucketLabel: yipBucket.label,
-      });
-    }
-  } else if (!yipIsIndividual) {
-    // YIP is a grouped bucket — split into 5 individual YIP values, keep YAC fixed
-    const yipSource = parsedFilters[FILTER_TYPE_YIP] || [];
-    for (const yipY of YEAR_INDIVIDUAL) {
-      const fm = { ...slice.filterMap };
-      fm[FILTER_TYPE_YIP] = makeYIPValues([yipY.id], yipSource);
-      newSlices.push({
-        id: makeId(), pid, depth: nextDepth, filterMap: fm,
-        yacIds: slice.yacIds, yipIds: [yipY.id], ...titleCarry, count: null,
-        url: buildURL(fm), fixedCombo: slice.fixedCombo,
-        yacBucketLabel: slice.yacBucketLabel, yipBucketLabel: `YIP: ${yipY.label}`,
-      });
-    }
-  } else if (!yacIsIndividual) {
-    // YIP is individual, YAC is not — split YAC into its individual ids, keep YIP fixed
-    const yacSource = parsedFilters[FILTER_TYPE_YAC] || [];
-    for (const yacId of slice.yacIds) {
-      const fm = { ...slice.filterMap };
-      fm[FILTER_TYPE_YAC] = makeYACValues([yacId], yacSource);
-      const yacIndiv = YEAR_INDIVIDUAL.find(y => y.id === yacId);
-      newSlices.push({
-        id: makeId(), pid, depth: nextDepth, filterMap: fm,
-        yacIds: [yacId], yipIds: slice.yipIds, ...titleCarry, count: null,
-        url: buildURL(fm), fixedCombo: slice.fixedCombo,
-        yacBucketLabel: `YAC: ${yacIndiv ? yacIndiv.label : yacId}`,
-        yipBucketLabel: slice.yipBucketLabel,
-      });
-    }
-  } else {
-    // Both YAC and YIP are individual — last resort: split CURRENT_TITLE into 2 groups
+  } else if (_canSplitByTitle(slice)) {
+    // Level 2 — split CURRENT_TITLE into 2 groups
     const titleVals = slice.filterMap[FILTER_TYPE_TITLE] || [];
-    const included = titleVals.filter(v => v.selectionType === 'INCLUDED');
-    const excluded = titleVals.filter(v => v.selectionType !== 'INCLUDED');
-    const g1Inc = included.filter(v => TITLE_GROUP_1_TEXTS.includes(v.text.toLowerCase()));
-    const g2Inc = included.filter(v => !TITLE_GROUP_1_TEXTS.includes(v.text.toLowerCase()));
+    const inc = titleVals.filter(v => v.selectionType === 'INCLUDED');
+    const exc = titleVals.filter(v => v.selectionType !== 'INCLUDED');
+    const g1Inc = inc.filter(v =>  TITLE_GROUP_1_TEXTS.includes(v.text.toLowerCase()));
+    const g2Inc = inc.filter(v => !TITLE_GROUP_1_TEXTS.includes(v.text.toLowerCase()));
     const groups = [
       { idx: 1, inc: g1Inc, label: 'Titles: Founder/Owner' },
-      { idx: 2, inc: g2Inc, label: 'Titles: Others' },
+      { idx: 2, inc: g2Inc, label: 'Titles: CEO/Executive' },
     ];
     for (const g of groups) {
-      const fm = { ...slice.filterMap };
-      fm[FILTER_TYPE_TITLE] = [...g.inc, ...excluded];
-      newSlices.push({
-        id: makeId(), pid, depth: nextDepth, filterMap: fm,
-        yacIds: slice.yacIds, yipIds: slice.yipIds,
-        titleGroupIdx: g.idx, titleGroupLabel: g.label,
-        count: null, url: buildURL(fm), fixedCombo: slice.fixedCombo,
-        yacBucketLabel: slice.yacBucketLabel, yipBucketLabel: slice.yipBucketLabel,
-      });
+      const fm = { ...slice.filterMap, [FILTER_TYPE_TITLE]: [...g.inc, ...exc] };
+      newSlices.push({ id: makeId(), pid, depth: nd, filterMap: fm,
+        ...base, titleGroupIdx: g.idx, titleGroupLabel: g.label,
+        count: null, url: buildURL(fm) });
+    }
+
+  } else if (_canSplitByIndustry(slice)) {
+    // Level 3 — split by INCLUDED Industry values
+    const allInd = parsedFilters[FILTER_TYPE_INDUSTRY] || [];
+    const incInd = allInd.filter(v => v.selectionType === 'INCLUDED');
+    const excInd = allInd.filter(v => v.selectionType !== 'INCLUDED');
+    for (const indVal of incInd) {
+      const fm = { ...slice.filterMap, [FILTER_TYPE_INDUSTRY]: [indVal, ...excInd] };
+      newSlices.push({ id: makeId(), pid, depth: nd, filterMap: fm,
+        ...base, industryIncluded: [indVal], count: null, url: buildURL(fm) });
+    }
+
+  } else {
+    // Level 4 — add FOLLOWER_COUNT buckets
+    for (const bucket of FOLLOWER_BUCKETS) {
+      const fm = { ...slice.filterMap,
+        [FILTER_TYPE_FOLLOWER]: [{ id: bucket.id, text: bucket.label, selectionType: 'INCLUDED' }] };
+      newSlices.push({ id: makeId(), pid, depth: nd, filterMap: fm,
+        ...base, followerBucket: bucket, count: null, url: buildURL(fm) });
     }
   }
 
@@ -514,43 +485,63 @@ function mergeSlices(prevIdx, currIdx) {
   const prev = slices[prevIdx];
   const curr = slices[currIdx];
 
-  // Combine year filter values
   const mergedFM = { ...prev.filterMap };
 
-  // Merge YAC
-  const prevYAC = mergedFM[FILTER_TYPE_YAC] || [];
-  const currYAC = curr.filterMap[FILTER_TYPE_YAC] || [];
-  const combinedYAC = [...prevYAC];
-  for (const v of currYAC) {
-    if (!combinedYAC.find(x => x.id === v.id)) combinedYAC.push(v);
-  }
-  mergedFM[FILTER_TYPE_YAC] = combinedYAC;
+  // Tracking fields start from prev; we'll override the dimension being merged.
+  let headcountIncluded = prev.headcountIncluded;
+  let hqIncluded        = prev.hqIncluded;
+  let titleGroupIdx     = prev.titleGroupIdx;
+  let titleGroupLabel   = prev.titleGroupLabel;
+  let industryIncluded  = prev.industryIncluded;
+  let followerBucket    = prev.followerBucket;
 
-  // Merge YIP if present
-  if (curr.filterMap[FILTER_TYPE_YIP]) {
-    const prevYIP = mergedFM[FILTER_TYPE_YIP] || [];
-    const currYIP = curr.filterMap[FILTER_TYPE_YIP] || [];
-    const combinedYIP = [...prevYIP];
-    for (const v of currYIP) {
-      if (!combinedYIP.find(x => x.id === v.id)) combinedYIP.push(v);
+  if (prev.followerBucket !== null) {
+    // Merge follower buckets → restore full follower filter
+    const combined = [...(prev.filterMap[FILTER_TYPE_FOLLOWER] || [])];
+    for (const v of (curr.filterMap[FILTER_TYPE_FOLLOWER] || [])) {
+      if (!combined.find(x => x.id === v.id)) combined.push(v);
     }
-    mergedFM[FILTER_TYPE_YIP] = combinedYIP;
+    mergedFM[FILTER_TYPE_FOLLOWER] = combined;
+    followerBucket = null;
+
+  } else if (prev.industryIncluded !== null) {
+    // Merge industry — restore both INCLUDED industry values
+    const excInd = (prev.filterMap[FILTER_TYPE_INDUSTRY] || []).filter(v => v.selectionType !== 'INCLUDED');
+    mergedFM[FILTER_TYPE_INDUSTRY] = [...prev.industryIncluded, ...curr.industryIncluded, ...excInd];
+    industryIncluded = null;
+
+  } else if (prev.titleGroupIdx !== null) {
+    // Merge title groups — restore all INCLUDED titles
+    const allInc = [
+      ...(prev.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType === 'INCLUDED'),
+      ...(curr.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType === 'INCLUDED'),
+    ];
+    const excTit = (prev.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType !== 'INCLUDED');
+    mergedFM[FILTER_TYPE_TITLE] = [...allInc, ...excTit];
+    titleGroupIdx   = null;
+    titleGroupLabel = null;
+
+  } else if (prev.hqIncluded !== null) {
+    // Merge HQ — restore both INCLUDED HQ values
+    const excHQ = (prev.filterMap[FILTER_TYPE_HQ] || []).filter(v => v.selectionType !== 'INCLUDED');
+    mergedFM[FILTER_TYPE_HQ] = [...prev.hqIncluded, ...curr.hqIncluded, ...excHQ];
+    hqIncluded = null;
+
+  } else {
+    // Merge initial headcount slices
+    const excHC = (prev.filterMap[FILTER_TYPE_HEADCOUNT] || []).filter(v => v.selectionType !== 'INCLUDED');
+    mergedFM[FILTER_TYPE_HEADCOUNT] = [...prev.headcountIncluded, ...curr.headcountIncluded, ...excHC];
+    headcountIncluded = [...prev.headcountIncluded, ...curr.headcountIncluded];
   }
 
   const merged = {
-    id: prev.id,
-    pid: prev.pid,
-    depth: prev.depth,
+    id: prev.id, pid: prev.pid, depth: prev.depth,
     filterMap: mergedFM,
-    yacIds: [...(prev.yacIds || []), ...(curr.yacIds || [])],
-    yipIds: prev.yipIds ? [...(prev.yipIds || []), ...(curr.yipIds || [])] : null,
+    headcountIncluded, hqIncluded,
+    titleGroupIdx, titleGroupLabel,
+    industryIncluded, followerBucket,
     count: prev.count + curr.count,
     url: buildURL(mergedFM),
-    fixedCombo: prev.fixedCombo,
-    yacBucketLabel: prev.yacBucketLabel + ' + ' + curr.yacBucketLabel,
-    yipBucketLabel: prev.yipBucketLabel
-      ? prev.yipBucketLabel + ' + ' + (curr.yipBucketLabel || '')
-      : null,
   };
 
   slices.splice(prevIdx, 2, merged);
@@ -571,24 +562,29 @@ function getStatus(slice) {
 function renderTags(slice) {
   let html = '';
 
-  // Fixed combo tags (grey)
-  for (const v of (slice.fixedCombo || [])) {
-    html += `<span class="tag tag-grey">${escHtml(v)}</span> `;
+  // Headcount (blue) — show which INCLUDED headcount value(s) are active
+  if (slice.headcountIncluded && slice.headcountIncluded.length > 0) {
+    html += `<span class="tag tag-blue">${escHtml(slice.headcountIncluded.map(v => v.text).join(', '))}</span> `;
   }
 
-  // YAC tag (blue)
-  if (slice.yacBucketLabel) {
-    html += `<span class="tag tag-blue">${escHtml(slice.yacBucketLabel)}</span> `;
+  // Company HQ (amber) — only after HQ re-slice
+  if (slice.hqIncluded && slice.hqIncluded.length > 0) {
+    html += `<span class="tag tag-amber">${escHtml(slice.hqIncluded.map(v => v.text).join(', '))}</span> `;
   }
 
-  // YIP tag (amber)
-  if (slice.yipBucketLabel) {
-    html += `<span class="tag tag-amber">${escHtml(slice.yipBucketLabel)}</span> `;
-  }
-
-  // Title group tag (green) — only shown after title split
+  // Title group (green) — only after title re-slice
   if (slice.titleGroupLabel) {
     html += `<span class="tag tag-green">${escHtml(slice.titleGroupLabel)}</span> `;
+  }
+
+  // Industry (purple) — only after industry re-slice
+  if (slice.industryIncluded && slice.industryIncluded.length > 0) {
+    html += `<span class="tag tag-purple">${escHtml(slice.industryIncluded.map(v => v.text).join(', '))}</span> `;
+  }
+
+  // Followers (orange) — only after followers re-slice
+  if (slice.followerBucket) {
+    html += `<span class="tag tag-orange">${escHtml(slice.followerBucket.label)}</span> `;
   }
 
   return html;
@@ -655,8 +651,7 @@ function renderFiltersCard(filters) {
     CURRENT_TITLE:        'Current Title',
     INDUSTRY:             'Industry',
     REGION:               'Geography (Personal)',
-    [FILTER_TYPE_YAC]:    'Years at Company',
-    [FILTER_TYPE_YIP]:    'Years in Position',
+    FOLLOWER_COUNT:       'Follower Count',
   };
 
   let html = '';
@@ -666,7 +661,7 @@ function renderFiltersCard(filters) {
     if (!vals || vals.length === 0) continue;
     hasAny = true;
     const label = dimLabels[dim] || dim;
-    const baseClass = dim === FILTER_TYPE_YAC ? 'tag-blue' : dim === FILTER_TYPE_YIP ? 'tag-amber' : 'tag-grey';
+    const baseClass = 'tag-grey';
     const valTags = vals.map(v => {
       const cls = v.selectionType === 'EXCLUDED' ? 'tag-red' : baseClass;
       return `<span class="tag ${cls}">${escHtml(v.text)}</span>`;
