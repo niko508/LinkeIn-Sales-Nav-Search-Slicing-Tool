@@ -271,7 +271,15 @@ function parseNavURL(raw) {
   try {
     const u = new URL(raw);
     queryStr = u.searchParams.get('query') || '';
+    if (!queryStr && u.searchParams.get('savedSearchId')) {
+      throw new Error(
+        'This is a saved search URL — the filters are stored on LinkedIn\'s servers, not in the URL itself. ' +
+        'To get a sliceable URL: open your saved search, wait for results to load, then copy the URL from ' +
+        'the browser address bar (it should contain "query=" with your filters).'
+      );
+    }
   } catch (e) {
+    if (e.message.includes('saved search')) throw e;
     throw new Error('Invalid URL');
   }
   if (!queryStr) throw new Error('No query parameter found in URL');
