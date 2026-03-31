@@ -242,15 +242,18 @@ const FILTER_TYPE_HEADCOUNT = 'COMPANY_HEADCOUNT';
 const FILTER_TYPE_HQ        = 'COMPANY_HEADQUARTERS';
 const FILTER_TYPE_TITLE     = 'CURRENT_TITLE';
 const FILTER_TYPE_INDUSTRY  = 'INDUSTRY';
-const FILTER_TYPE_FOLLOWER  = 'FOLLOWER_COUNT';
+const FILTER_TYPE_REGION    = 'REGION';
 
-// Follower count buckets (LinkedIn Sales Nav standard IDs)
-const FOLLOWER_BUCKETS = [
-  { label: 'Followers: 1–500',  id: 'A' },
-  { label: 'Followers: 501–1k', id: 'B' },
-  { label: 'Followers: 1k–5k',  id: 'C' },
-  { label: 'Followers: 5k–10k', id: 'D' },
-  { label: 'Followers: 10k+',   id: 'E' },
+const US_HQ_ID = '103644278'; // LinkedIn geoUrn ID for United States
+
+// Top 5 US states by LinkedIn user density — IDs are LinkedIn geoUrn numeric IDs.
+// Verify each by adding the state in LinkedIn Sales Nav Geography filter and checking the URL.
+const US_TOP_STATES = [
+  { id: '102095887', text: 'California' },
+  { id: '102748797', text: 'Texas'      },
+  { id: '102571732', text: 'New York'   },
+  { id: '101318387', text: 'Florida'    },
+  { id: '102454443', text: 'Illinois'   },
 ];
 
 // Title split groups — matched case-insensitively (exact text)
@@ -368,7 +371,7 @@ function createInitialSlices(filters) {
       id: makeId(), pid, depth: 0, filterMap: fm,
       headcountIncluded: includedHC,
       hqIncluded: null, titleGroupIdx: null, titleGroupLabel: null,
-      industryIncluded: null, followerBucket: null,
+      industryIncluded: null, stateLabel: null,
       count: null, url: buildURL(fm),
     });
   } else {
@@ -378,7 +381,7 @@ function createInitialSlices(filters) {
         id: makeId(), pid, depth: 0, filterMap: fm,
         headcountIncluded: [hcVal],
         hqIncluded: null, titleGroupIdx: null, titleGroupLabel: null,
-        industryIncluded: null, followerBucket: null,
+        industryIncluded: null, stateLabel: null,
         count: null, url: buildURL(fm),
       });
     }
@@ -407,15 +410,16 @@ function _canSplitByIndustry(slice) {
   return (parsedFilters[FILTER_TYPE_INDUSTRY] || []).filter(v => v.selectionType === 'INCLUDED').length >= 2;
 }
 
-function _canSplitByFollowers(slice) {
-  if (slice.followerBucket !== null) return false; // already follower-split by tool
-  if ((parsedFilters[FILTER_TYPE_FOLLOWER] || []).length > 0) return false; // original URL has follower filter
-  return true;
+function _canSplitByState(slice) {
+  if (slice.stateLabel !== null) return false;
+  // Only applies when the slice's HQ filter is exactly United States
+  const hqIncl = (slice.filterMap[FILTER_TYPE_HQ] || []).filter(v => v.selectionType === 'INCLUDED');
+  return hqIncl.length === 1 && hqIncl[0].id === US_HQ_ID;
 }
 
 function canResliceFurther(slice) {
   return _canSplitByHQ(slice) || _canSplitByTitle(slice) ||
-         _canSplitByIndustry(slice) || _canSplitByFollowers(slice);
+         _canSplitByIndustry(slice) || _canSplitByState(slice);
 }
 
 function resliceSlice(slice) {
@@ -432,7 +436,7 @@ function resliceSlice(slice) {
     titleGroupIdx:     slice.titleGroupIdx,
     titleGroupLabel:   slice.titleGroupLabel,
     industryIncluded:  slice.industryIncluded,
-    followerBucket:    slice.followerBucket,
+    stateLabel:        slice.stateLabel,
   };
 
   if (_canSplitByHQ(slice)) {
@@ -476,13 +480,24 @@ function resliceSlice(slice) {
     }
 
   } else {
-    // Level 4 — add FOLLOWER_COUNT buckets
-    for (const bucket of FOLLOWER_BUCKETS) {
-      const fm = { ...slice.filterMap,
-        [FILTER_TYPE_FOLLOWER]: [{ id: bucket.id, text: bucket.label, selectionType: 'INCLUDED' }] };
+    // Level 4 — split US search by top 5 states + Rest of US
+    // Keep all existing REGION excluded values (e.g. Asia, India exclusions from original search)
+    const regionExcl = (slice.filterMap[FILTER_TYPE_REGION] || [])
+      .filter(v => v.selectionType === 'EXCLUDED');
+
+    // One slice per top state (REGION INCLUDED = that state)
+    for (const state of US_TOP_STATES) {
+      const stateVal = { id: state.id, text: state.text, selectionType: 'INCLUDED' };
+      const fm = { ...slice.filterMap, [FILTER_TYPE_REGION]: [stateVal, ...regionExcl] };
       newSlices.push({ id: makeId(), pid, depth: nd, filterMap: fm,
-        ...base, followerBucket: bucket, count: null, url: buildURL(fm) });
+        ...base, stateLabel: state.text, count: null, url: buildURL(fm) });
     }
+
+    // Rest of US — exclude the top 5 states (on top of existing exclusions)
+    const stateExcls = US_TOP_STATES.map(s => ({ id: s.id, text: s.text, selectionType: 'EXCLUDED' }));
+    const fmRest = { ...slice.filterMap, [FILTER_TYPE_REGION]: [...regionExcl, ...stateExcls] };
+    newSlices.push({ id: makeId(), pid, depth: nd, filterMap: fmRest,
+      ...base, stateLabel: 'Rest of US', count: null, url: buildURL(fmRest) });
   }
 
   return newSlices;
@@ -495,6 +510,8 @@ function canMerge(prev, curr) {
   if (prev.pid !== curr.pid) return false;
   if (prev.count === null || curr.count === null) return false;
   if ((prev.count + curr.count) > 2500) return false;
+  // Cannot merge a state slice with Rest of US (different REGION structure)
+  if (prev.stateLabel === 'Rest of US' || curr.stateLabel === 'Rest of US') return false;
   return true;
 }
 
@@ -510,16 +527,16 @@ function mergeSlices(prevIdx, currIdx) {
   let titleGroupIdx     = prev.titleGroupIdx;
   let titleGroupLabel   = prev.titleGroupLabel;
   let industryIncluded  = prev.industryIncluded;
-  let followerBucket    = prev.followerBucket;
+  let stateLabel        = prev.stateLabel;
 
-  if (prev.followerBucket !== null) {
-    // Merge follower buckets → restore full follower filter
-    const combined = [...(prev.filterMap[FILTER_TYPE_FOLLOWER] || [])];
-    for (const v of (curr.filterMap[FILTER_TYPE_FOLLOWER] || [])) {
-      if (!combined.find(x => x.id === v.id)) combined.push(v);
-    }
-    mergedFM[FILTER_TYPE_FOLLOWER] = combined;
-    followerBucket = null;
+  if (prev.stateLabel !== null && curr.stateLabel !== null
+      && prev.stateLabel !== 'Rest of US' && curr.stateLabel !== 'Rest of US') {
+    // Merge two individual state slices → combine INCLUDED state values
+    const prevStateVals = (prev.filterMap[FILTER_TYPE_REGION] || []).filter(v => v.selectionType === 'INCLUDED');
+    const currStateVals = (curr.filterMap[FILTER_TYPE_REGION] || []).filter(v => v.selectionType === 'INCLUDED');
+    const excl = (prev.filterMap[FILTER_TYPE_REGION] || []).filter(v => v.selectionType === 'EXCLUDED');
+    mergedFM[FILTER_TYPE_REGION] = [...prevStateVals, ...currStateVals, ...excl];
+    stateLabel = [...prevStateVals, ...currStateVals].map(v => v.text).join(' + ');
 
   } else if (prev.industryIncluded !== null) {
     // Merge industry — restore both INCLUDED industry values
@@ -556,7 +573,7 @@ function mergeSlices(prevIdx, currIdx) {
     filterMap: mergedFM,
     headcountIncluded, hqIncluded,
     titleGroupIdx, titleGroupLabel,
-    industryIncluded, followerBucket,
+    industryIncluded, stateLabel,
     count: prev.count + curr.count,
     url: buildURL(mergedFM),
   };
@@ -599,9 +616,9 @@ function renderTags(slice) {
     html += `<span class="tag tag-purple">${escHtml(slice.industryIncluded.map(v => v.text).join(', '))}</span> `;
   }
 
-  // Followers (orange) — only after followers re-slice
-  if (slice.followerBucket) {
-    html += `<span class="tag tag-orange">${escHtml(slice.followerBucket.label)}</span> `;
+  // US state (orange) — only after state re-slice
+  if (slice.stateLabel) {
+    html += `<span class="tag tag-orange">${escHtml(slice.stateLabel)}</span> `;
   }
 
   return html;
@@ -668,7 +685,6 @@ function renderFiltersCard(filters) {
     CURRENT_TITLE:        'Current Title',
     INDUSTRY:             'Industry',
     REGION:               'Geography (Personal)',
-    FOLLOWER_COUNT:       'Follower Count',
   };
 
   let html = '';
