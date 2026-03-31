@@ -246,14 +246,14 @@ const FILTER_TYPE_REGION    = 'REGION';
 
 const US_HQ_ID = '103644278'; // LinkedIn geoUrn ID for United States
 
-// Top 5 US states by LinkedIn user density — IDs are LinkedIn geoUrn numeric IDs.
-// Verify each by adding the state in LinkedIn Sales Nav Geography filter and checking the URL.
+// Top 5 US states — IDs and text verified from LinkedIn Sales Nav REGION filter URLs.
+// `text` = exact value LinkedIn uses in the URL; `label` = short display label for tags.
 const US_TOP_STATES = [
-  { id: '102095887', text: 'California' },
-  { id: '102748797', text: 'Texas'      },
-  { id: '102571732', text: 'New York'   },
-  { id: '101318387', text: 'Florida'    },
-  { id: '102454443', text: 'Illinois'   },
+  { id: '102095887', text: 'California, United States', label: 'California' },
+  { id: '102748797', text: 'Texas, United States',      label: 'Texas'      },
+  { id: '105080838', text: 'New York, United States',   label: 'New York'   },
+  { id: '101318387', text: 'Florida, United States',    label: 'Florida'    },
+  { id: '101949407', text: 'Illinois, United States',   label: 'Illinois'   },
 ];
 
 // Title split groups — matched case-insensitively (exact text)
@@ -485,17 +485,19 @@ function resliceSlice(slice) {
     const regionExcl = (slice.filterMap[FILTER_TYPE_REGION] || [])
       .filter(v => v.selectionType === 'EXCLUDED');
 
-    // One slice per top state (REGION INCLUDED = that state)
+    // One slice per top state (REGION INCLUDED = that state only)
     for (const state of US_TOP_STATES) {
       const stateVal = { id: state.id, text: state.text, selectionType: 'INCLUDED' };
       const fm = { ...slice.filterMap, [FILTER_TYPE_REGION]: [stateVal, ...regionExcl] };
       newSlices.push({ id: makeId(), pid, depth: nd, filterMap: fm,
-        ...base, stateLabel: state.text, count: null, url: buildURL(fm) });
+        ...base, stateLabel: state.label, count: null, url: buildURL(fm) });
     }
 
-    // Rest of US — exclude the top 5 states (on top of existing exclusions)
+    // Rest of US — INCLUDE United States + EXCLUDE the 5 states + keep existing exclusions.
+    // Must include United States explicitly, otherwise LinkedIn shows the whole world minus those states.
+    const usIncl     = { id: US_HQ_ID, text: 'United States', selectionType: 'INCLUDED' };
     const stateExcls = US_TOP_STATES.map(s => ({ id: s.id, text: s.text, selectionType: 'EXCLUDED' }));
-    const fmRest = { ...slice.filterMap, [FILTER_TYPE_REGION]: [...regionExcl, ...stateExcls] };
+    const fmRest = { ...slice.filterMap, [FILTER_TYPE_REGION]: [usIncl, ...stateExcls, ...regionExcl] };
     newSlices.push({ id: makeId(), pid, depth: nd, filterMap: fmRest,
       ...base, stateLabel: 'Rest of US', count: null, url: buildURL(fmRest) });
   }
@@ -536,7 +538,7 @@ function mergeSlices(prevIdx, currIdx) {
     const currStateVals = (curr.filterMap[FILTER_TYPE_REGION] || []).filter(v => v.selectionType === 'INCLUDED');
     const excl = (prev.filterMap[FILTER_TYPE_REGION] || []).filter(v => v.selectionType === 'EXCLUDED');
     mergedFM[FILTER_TYPE_REGION] = [...prevStateVals, ...currStateVals, ...excl];
-    stateLabel = [...prevStateVals, ...currStateVals].map(v => v.text).join(' + ');
+    stateLabel = prev.stateLabel + ' + ' + curr.stateLabel;
 
   } else if (prev.industryIncluded !== null) {
     // Merge industry — restore both INCLUDED industry values
