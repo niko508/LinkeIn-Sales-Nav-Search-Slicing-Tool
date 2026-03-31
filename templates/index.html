@@ -54,8 +54,10 @@
     transition: background .15s, transform .1s;
   }
   .btn:active { transform: scale(.97); }
-  .btn-primary { background: #0a66c2; color: #fff; }
+  .btn-primary   { background: #0a66c2; color: #fff; }
   .btn-primary:hover { background: #0958a8; }
+  .btn-secondary { background: #e5e7eb; color: #374151; }
+  .btn-secondary:hover { background: #d1d5db; }
   .btn-danger  { background: #e53935; color: #fff; }
   .btn-danger:hover { background: #c62828; }
   .btn-sm { padding: 5px 12px; font-size: .8rem; }
@@ -113,6 +115,7 @@
   .stat-verified span { color: #059669; }
   .stat-overlimit span { color: #dc2626; }
   .stat-pending span { color: #6b7280; }
+  .stat-count   span { color: #1d4ed8; font-weight: 700; }
   .stats-bar .spacer { flex: 1; }
 
   /* Table */
@@ -206,7 +209,9 @@
     <div class="stat stat-verified">Verified: <span id="statVerified">0</span></div>
     <div class="stat stat-overlimit">Over Limit: <span id="statOverlimit">0</span></div>
     <div class="stat stat-pending">Pending: <span id="statPending">0</span></div>
+    <div class="stat stat-count">Total Results: <span id="statCount">—</span></div>
     <div class="spacer"></div>
+    <button class="btn btn-secondary btn-sm" onclick="verifyAll()">Verify All</button>
     <button class="btn btn-primary btn-sm" onclick="copyVerified()">Copy verified URLs</button>
   </div>
 
@@ -719,11 +724,22 @@ function updateStats() {
   const verified  = slices.filter(s => getStatus(s) === 'verified').length;
   const overlimit = slices.filter(s => getStatus(s) === 'overlimit').length;
   const pending   = slices.filter(s => getStatus(s) === 'pending').length;
+  const countSum  = slices.reduce((sum, s) => s.count !== null ? sum + s.count : sum, 0);
+  const hasAny    = slices.some(s => s.count !== null);
 
   document.getElementById('statTotal').textContent    = total;
   document.getElementById('statVerified').textContent  = verified;
   document.getElementById('statOverlimit').textContent = overlimit;
   document.getElementById('statPending').textContent   = pending;
+  document.getElementById('statCount').textContent     = hasAny ? countSum.toLocaleString() : '—';
+}
+
+function verifyAll() {
+  const pending = slices.filter(s => s.count === null);
+  if (pending.length === 0) { alert('All slices already have counts entered.'); return; }
+  for (const s of pending) {
+    window.open(s.url, '_blank', 'noopener');
+  }
 }
 
 // ─── Event Handlers ───────────────────────────────────────────────────────────
