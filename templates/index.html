@@ -331,7 +331,10 @@ function buildFilterStr(type, values) {
 
 function buildURL(filterMap) {
   const parts = Object.entries(filterMap).map(([type, vals]) => buildFilterStr(type, vals));
-  const query = encodeURIComponent(`(filters:List(${parts.join(',')}))`);
+  // Use LinkedIn's native URL format: encode special chars but leave parentheses literal,
+  // since LinkedIn's URL parser expects unencoded ( ) in the query parameter.
+  const query = encodeURIComponent(`(filters:List(${parts.join(',')}))`)
+    .replace(/%28/g, '(').replace(/%29/g, ')');
   return `https://www.linkedin.com/sales/search/people?query=${query}&viewAllFilters=true`;
 }
 
@@ -404,9 +407,15 @@ function _canSplitByIndustry(slice) {
   return (parsedFilters[FILTER_TYPE_INDUSTRY] || []).filter(v => v.selectionType === 'INCLUDED').length >= 2;
 }
 
+function _canSplitByFollowers(slice) {
+  if (slice.followerBucket !== null) return false; // already follower-split by tool
+  if ((parsedFilters[FILTER_TYPE_FOLLOWER] || []).length > 0) return false; // original URL has follower filter
+  return true;
+}
+
 function canResliceFurther(slice) {
   return _canSplitByHQ(slice) || _canSplitByTitle(slice) ||
-         _canSplitByIndustry(slice) || slice.followerBucket === null;
+         _canSplitByIndustry(slice) || _canSplitByFollowers(slice);
 }
 
 function resliceSlice(slice) {
