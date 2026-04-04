@@ -333,7 +333,7 @@ function parseNavURL(raw) {
 // ─── URL Building ─────────────────────────────────────────────────────────────
 
 function buildFilterStr(type, values) {
-  const vStr = values.map(v => `(id:${v.id},text:${v.text},selectionType:${v.selectionType || 'INCLUDED'})`).join(',');
+  const vStr = values.map(v => `(id:${v.id},text:${encodeURIComponent(v.text)},selectionType:${v.selectionType || 'INCLUDED'})`).join(',');
   return `(type:${type},values:List(${vStr}))`;
 }
 
