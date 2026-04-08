@@ -96,6 +96,8 @@
   .tag-red    { background: #fee2e2; color: #991b1b; }
   .tag-purple { background: #ede9fe; color: #5b21b6; }
   .tag-orange { background: #ffedd5; color: #9a3412; }
+  .tag-teal   { background: #ccfbf1; color: #0f766e; }
+  .tag-slate  { background: #e2e8f0; color: #334155; }
 
   /* Stats bar */
   .stats-bar {
@@ -248,6 +250,15 @@ const FILTER_TYPE_HQ        = 'COMPANY_HEADQUARTERS';
 const FILTER_TYPE_TITLE     = 'CURRENT_TITLE';
 const FILTER_TYPE_INDUSTRY  = 'INDUSTRY';
 const FILTER_TYPE_REGION    = 'REGION';
+const FILTER_TYPE_YIP       = 'YEARS_IN_CURRENT_POSITION';
+
+const YIP_BUCKETS = [
+  { id: '1', text: 'Less than 1 year',   label: '<1 yr'    },
+  { id: '2', text: '1 to 2 years',       label: '1-2 yrs'  },
+  { id: '3', text: '3 to 5 years',       label: '3-5 yrs'  },
+  { id: '4', text: '6 to 10 years',      label: '6-10 yrs' },
+  { id: '5', text: 'More than 10 years', label: '10+ yrs'  },
+];
 
 const US_HQ_ID = '103644278'; // LinkedIn geoUrn ID for United States
 
@@ -377,6 +388,7 @@ function createInitialSlices(filters) {
       headcountIncluded: includedHC,
       hqIncluded: null, titleGroupIdx: null, titleGroupLabel: null,
       industryIncluded: null, stateLabel: null,
+      individualTitleIdx: null, individualTitleLabel: null, yipBucket: null,
       count: null, url: buildURL(fm),
     });
   } else {
@@ -387,6 +399,7 @@ function createInitialSlices(filters) {
         headcountIncluded: [hcVal],
         hqIncluded: null, titleGroupIdx: null, titleGroupLabel: null,
         industryIncluded: null, stateLabel: null,
+        individualTitleIdx: null, individualTitleLabel: null, yipBucket: null,
         count: null, url: buildURL(fm),
       });
     }
@@ -422,9 +435,19 @@ function _canSplitByState(slice) {
   return hqIncl.length === 1 && hqIncl[0].id === US_HQ_ID;
 }
 
+function _canSplitByIndividualTitle(slice) {
+  if (slice.individualTitleIdx !== null) return false;
+  return (slice.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType === 'INCLUDED').length >= 2;
+}
+
+function _canSplitByYIP(slice) {
+  return slice.yipBucket === null;
+}
+
 function canResliceFurther(slice) {
   return _canSplitByHQ(slice) || _canSplitByTitle(slice) ||
-         _canSplitByIndustry(slice) || _canSplitByState(slice);
+         _canSplitByIndustry(slice) || _canSplitByState(slice) ||
+         _canSplitByIndividualTitle(slice) || _canSplitByYIP(slice);
 }
 
 function resliceSlice(slice) {
@@ -436,12 +459,15 @@ function resliceSlice(slice) {
 
   // Carry all tracking fields from parent; the active branch overrides its own field.
   const base = {
-    headcountIncluded: slice.headcountIncluded,
-    hqIncluded:        slice.hqIncluded,
-    titleGroupIdx:     slice.titleGroupIdx,
-    titleGroupLabel:   slice.titleGroupLabel,
-    industryIncluded:  slice.industryIncluded,
-    stateLabel:        slice.stateLabel,
+    headcountIncluded:    slice.headcountIncluded,
+    hqIncluded:           slice.hqIncluded,
+    titleGroupIdx:        slice.titleGroupIdx,
+    titleGroupLabel:      slice.titleGroupLabel,
+    industryIncluded:     slice.industryIncluded,
+    stateLabel:           slice.stateLabel,
+    individualTitleIdx:   slice.individualTitleIdx,
+    individualTitleLabel: slice.individualTitleLabel,
+    yipBucket:            slice.yipBucket,
   };
 
   if (_canSplitByHQ(slice)) {
@@ -484,7 +510,7 @@ function resliceSlice(slice) {
         ...base, industryIncluded: [indVal], count: null, url: buildURL(fm) });
     }
 
-  } else {
+  } else if (_canSplitByState(slice)) {
     // Level 4 — split US search by top 5 states + Rest of US
     // Keep all existing REGION excluded values (e.g. Asia, India exclusions from original search)
     const regionExcl = (slice.filterMap[FILTER_TYPE_REGION] || [])
@@ -505,6 +531,28 @@ function resliceSlice(slice) {
     const fmRest = { ...slice.filterMap, [FILTER_TYPE_REGION]: [usIncl, ...stateExcls, ...regionExcl] };
     newSlices.push({ id: makeId(), pid, depth: nd, filterMap: fmRest,
       ...base, stateLabel: 'Rest of US', count: null, url: buildURL(fmRest) });
+
+  } else if (_canSplitByIndividualTitle(slice)) {
+    // Level 5 — split each INCLUDED title into its own individual search
+    const titleVals = slice.filterMap[FILTER_TYPE_TITLE] || [];
+    const inc = titleVals.filter(v => v.selectionType === 'INCLUDED');
+    const exc = titleVals.filter(v => v.selectionType !== 'INCLUDED');
+    for (let i = 0; i < inc.length; i++) {
+      const titleVal = inc[i];
+      const fm = { ...slice.filterMap, [FILTER_TYPE_TITLE]: [titleVal, ...exc] };
+      newSlices.push({ id: makeId(), pid, depth: nd, filterMap: fm,
+        ...base, individualTitleIdx: i, individualTitleLabel: titleVal.text,
+        count: null, url: buildURL(fm) });
+    }
+
+  } else if (_canSplitByYIP(slice)) {
+    // Level 6 — split by Years in Current Position (5 buckets)
+    for (const bucket of YIP_BUCKETS) {
+      const yipVal = { id: bucket.id, text: bucket.text, selectionType: 'INCLUDED' };
+      const fm = { ...slice.filterMap, [FILTER_TYPE_YIP]: [yipVal] };
+      newSlices.push({ id: makeId(), pid, depth: nd, filterMap: fm,
+        ...base, yipBucket: bucket.id, count: null, url: buildURL(fm) });
+    }
   }
 
   return newSlices;
@@ -529,12 +577,15 @@ function mergeSlices(prevIdx, currIdx) {
   const mergedFM = { ...prev.filterMap };
 
   // Tracking fields start from prev; we'll override the dimension being merged.
-  let headcountIncluded = prev.headcountIncluded;
-  let hqIncluded        = prev.hqIncluded;
-  let titleGroupIdx     = prev.titleGroupIdx;
-  let titleGroupLabel   = prev.titleGroupLabel;
-  let industryIncluded  = prev.industryIncluded;
-  let stateLabel        = prev.stateLabel;
+  let headcountIncluded    = prev.headcountIncluded;
+  let hqIncluded           = prev.hqIncluded;
+  let titleGroupIdx        = prev.titleGroupIdx;
+  let titleGroupLabel      = prev.titleGroupLabel;
+  let industryIncluded     = prev.industryIncluded;
+  let stateLabel           = prev.stateLabel;
+  let individualTitleIdx   = prev.individualTitleIdx;
+  let individualTitleLabel = prev.individualTitleLabel;
+  let yipBucket            = prev.yipBucket;
 
   if (prev.stateLabel !== null && curr.stateLabel !== null
       && prev.stateLabel !== 'Rest of US' && curr.stateLabel !== 'Rest of US') {
@@ -568,6 +619,26 @@ function mergeSlices(prevIdx, currIdx) {
     mergedFM[FILTER_TYPE_HQ] = [...prev.hqIncluded, ...curr.hqIncluded, ...excHQ];
     hqIncluded = null;
 
+  } else if (prev.yipBucket !== null) {
+    // Merge YIP slices — combine both YIP bucket values
+    const allYip = [
+      ...(prev.filterMap[FILTER_TYPE_YIP] || []),
+      ...(curr.filterMap[FILTER_TYPE_YIP] || []),
+    ];
+    mergedFM[FILTER_TYPE_YIP] = allYip;
+    yipBucket = null;
+
+  } else if (prev.individualTitleIdx !== null) {
+    // Merge individual title slices — restore both INCLUDED title values
+    const allInc = [
+      ...(prev.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType === 'INCLUDED'),
+      ...(curr.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType === 'INCLUDED'),
+    ];
+    const excTit = (prev.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType !== 'INCLUDED');
+    mergedFM[FILTER_TYPE_TITLE] = [...allInc, ...excTit];
+    individualTitleIdx   = null;
+    individualTitleLabel = prev.individualTitleLabel + ' + ' + curr.individualTitleLabel;
+
   } else {
     // Merge initial headcount slices
     const excHC = (prev.filterMap[FILTER_TYPE_HEADCOUNT] || []).filter(v => v.selectionType !== 'INCLUDED');
@@ -581,6 +652,7 @@ function mergeSlices(prevIdx, currIdx) {
     headcountIncluded, hqIncluded,
     titleGroupIdx, titleGroupLabel,
     industryIncluded, stateLabel,
+    individualTitleIdx, individualTitleLabel, yipBucket,
     count: prev.count + curr.count,
     url: buildURL(mergedFM),
   };
@@ -626,6 +698,17 @@ function renderTags(slice) {
   // US state (orange) — only after state re-slice
   if (slice.stateLabel) {
     html += `<span class="tag tag-orange">${escHtml(slice.stateLabel)}</span> `;
+  }
+
+  // Individual title (teal) — only after individual title re-slice
+  if (slice.individualTitleLabel) {
+    html += `<span class="tag tag-teal">${escHtml(slice.individualTitleLabel)}</span> `;
+  }
+
+  // YIP bucket (slate) — only after YIP re-slice
+  if (slice.yipBucket !== null) {
+    const bucket = YIP_BUCKETS.find(b => b.id === slice.yipBucket);
+    if (bucket) html += `<span class="tag tag-slate">YIP: ${escHtml(bucket.label)}</span> `;
   }
 
   return html;
