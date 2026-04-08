@@ -587,63 +587,69 @@ function mergeSlices(prevIdx, currIdx) {
   let individualTitleLabel = prev.individualTitleLabel;
   let yipBucket            = prev.yipBucket;
 
-  if (prev.stateLabel !== null && curr.stateLabel !== null
+  // NOTE: Check EITHER prev OR curr having a tracking field set. After sequential merges
+  // the accumulated "prev" may have had its tracking field reset to null, but "curr"
+  // (the next original sibling) still has its field set — so we must check both.
+  // All filter-value reads use filterMap (not tracking fields) for the same reason.
+
+  if ((prev.stateLabel !== null || curr.stateLabel !== null)
       && prev.stateLabel !== 'Rest of US' && curr.stateLabel !== 'Rest of US') {
-    // Merge two individual state slices → combine INCLUDED state values
+    // Merge state slices — combine INCLUDED REGION values
     const prevStateVals = (prev.filterMap[FILTER_TYPE_REGION] || []).filter(v => v.selectionType === 'INCLUDED');
     const currStateVals = (curr.filterMap[FILTER_TYPE_REGION] || []).filter(v => v.selectionType === 'INCLUDED');
     const excl = (prev.filterMap[FILTER_TYPE_REGION] || []).filter(v => v.selectionType === 'EXCLUDED');
     mergedFM[FILTER_TYPE_REGION] = [...prevStateVals, ...currStateVals, ...excl];
-    stateLabel = prev.stateLabel + ' + ' + curr.stateLabel;
+    stateLabel = [prev.stateLabel, curr.stateLabel].filter(Boolean).join(' + ');
 
-  } else if (prev.industryIncluded !== null) {
-    // Merge industry — restore both INCLUDED industry values
-    const excInd = (prev.filterMap[FILTER_TYPE_INDUSTRY] || []).filter(v => v.selectionType !== 'INCLUDED');
-    mergedFM[FILTER_TYPE_INDUSTRY] = [...prev.industryIncluded, ...curr.industryIncluded, ...excInd];
-    industryIncluded = null;
-
-  } else if (prev.titleGroupIdx !== null) {
-    // Merge title groups — restore all INCLUDED titles
-    const allInc = [
-      ...(prev.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType === 'INCLUDED'),
-      ...(curr.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType === 'INCLUDED'),
-    ];
-    const excTit = (prev.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType !== 'INCLUDED');
-    mergedFM[FILTER_TYPE_TITLE] = [...allInc, ...excTit];
-    titleGroupIdx   = null;
-    titleGroupLabel = null;
-
-  } else if (prev.hqIncluded !== null) {
-    // Merge HQ — restore both INCLUDED HQ values
-    const excHQ = (prev.filterMap[FILTER_TYPE_HQ] || []).filter(v => v.selectionType !== 'INCLUDED');
-    mergedFM[FILTER_TYPE_HQ] = [...prev.hqIncluded, ...curr.hqIncluded, ...excHQ];
-    hqIncluded = null;
-
-  } else if (prev.yipBucket !== null) {
-    // Merge YIP slices — combine both YIP bucket values
-    const allYip = [
+  } else if (prev.yipBucket !== null || curr.yipBucket !== null) {
+    // Merge YIP slices — combine bucket values
+    mergedFM[FILTER_TYPE_YIP] = [
       ...(prev.filterMap[FILTER_TYPE_YIP] || []),
       ...(curr.filterMap[FILTER_TYPE_YIP] || []),
     ];
-    mergedFM[FILTER_TYPE_YIP] = allYip;
     yipBucket = null;
 
-  } else if (prev.individualTitleIdx !== null) {
-    // Merge individual title slices — restore both INCLUDED title values
-    const allInc = [
-      ...(prev.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType === 'INCLUDED'),
-      ...(curr.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType === 'INCLUDED'),
-    ];
-    const excTit = (prev.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType !== 'INCLUDED');
-    mergedFM[FILTER_TYPE_TITLE] = [...allInc, ...excTit];
+  } else if (prev.individualTitleIdx !== null || curr.individualTitleIdx !== null) {
+    // Merge individual title slices
+    const prevInc = (prev.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType === 'INCLUDED');
+    const currInc = (curr.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType === 'INCLUDED');
+    const excTit  = (prev.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType !== 'INCLUDED');
+    mergedFM[FILTER_TYPE_TITLE] = [...prevInc, ...currInc, ...excTit];
     individualTitleIdx   = null;
-    individualTitleLabel = prev.individualTitleLabel + ' + ' + curr.individualTitleLabel;
+    individualTitleLabel = [prev.individualTitleLabel, curr.individualTitleLabel].filter(Boolean).join(' + ');
+
+  } else if (prev.industryIncluded !== null || curr.industryIncluded !== null) {
+    // Merge industry — restore all INCLUDED industry values from both filter maps
+    const prevInc = (prev.filterMap[FILTER_TYPE_INDUSTRY] || []).filter(v => v.selectionType === 'INCLUDED');
+    const currInc = (curr.filterMap[FILTER_TYPE_INDUSTRY] || []).filter(v => v.selectionType === 'INCLUDED');
+    const excInd  = (prev.filterMap[FILTER_TYPE_INDUSTRY] || []).filter(v => v.selectionType !== 'INCLUDED');
+    mergedFM[FILTER_TYPE_INDUSTRY] = [...prevInc, ...currInc, ...excInd];
+    industryIncluded = null;
+
+  } else if (prev.titleGroupIdx !== null || curr.titleGroupIdx !== null) {
+    // Merge title groups — restore all INCLUDED titles
+    const prevInc = (prev.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType === 'INCLUDED');
+    const currInc = (curr.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType === 'INCLUDED');
+    const excTit  = (prev.filterMap[FILTER_TYPE_TITLE] || []).filter(v => v.selectionType !== 'INCLUDED');
+    mergedFM[FILTER_TYPE_TITLE] = [...prevInc, ...currInc, ...excTit];
+    titleGroupIdx   = null;
+    titleGroupLabel = null;
+
+  } else if (prev.hqIncluded !== null || curr.hqIncluded !== null) {
+    // Merge HQ — restore both INCLUDED HQ values
+    const prevInc = (prev.filterMap[FILTER_TYPE_HQ] || []).filter(v => v.selectionType === 'INCLUDED');
+    const currInc = (curr.filterMap[FILTER_TYPE_HQ] || []).filter(v => v.selectionType === 'INCLUDED');
+    const excHQ   = (prev.filterMap[FILTER_TYPE_HQ] || []).filter(v => v.selectionType !== 'INCLUDED');
+    mergedFM[FILTER_TYPE_HQ] = [...prevInc, ...currInc, ...excHQ];
+    hqIncluded = null;
 
   } else {
-    // Merge initial headcount slices
-    const excHC = (prev.filterMap[FILTER_TYPE_HEADCOUNT] || []).filter(v => v.selectionType !== 'INCLUDED');
-    mergedFM[FILTER_TYPE_HEADCOUNT] = [...prev.headcountIncluded, ...curr.headcountIncluded, ...excHC];
-    headcountIncluded = [...prev.headcountIncluded, ...curr.headcountIncluded];
+    // Merge headcount slices
+    const prevInc = (prev.filterMap[FILTER_TYPE_HEADCOUNT] || []).filter(v => v.selectionType === 'INCLUDED');
+    const currInc = (curr.filterMap[FILTER_TYPE_HEADCOUNT] || []).filter(v => v.selectionType === 'INCLUDED');
+    const excHC   = (prev.filterMap[FILTER_TYPE_HEADCOUNT] || []).filter(v => v.selectionType !== 'INCLUDED');
+    mergedFM[FILTER_TYPE_HEADCOUNT] = [...prevInc, ...currInc, ...excHC];
+    headcountIncluded = [...(prev.headcountIncluded || []), ...(curr.headcountIncluded || [])];
   }
 
   const merged = {
