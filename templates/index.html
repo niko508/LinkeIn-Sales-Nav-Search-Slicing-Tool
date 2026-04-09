@@ -99,6 +99,21 @@
   .tag-teal   { background: #ccfbf1; color: #0f766e; }
   .tag-slate  { background: #e2e8f0; color: #334155; }
 
+  /* Group header row — shows parent count vs children sum */
+  .group-header-row td { padding: 0; border-bottom: none; }
+  .group-header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 6px 16px;
+    background: #f0f9ff;
+    border-left: 3px solid #38bdf8;
+    font-size: .78rem; color: #0369a1;
+  }
+  .group-header strong { color: #0c4a6e; }
+  .group-sep { color: #7dd3fc; }
+  .group-diff-match  { color: #16a34a; font-weight: 600; }
+  .group-diff-gap    { color: #d97706; font-weight: 600; }
+  .group-diff-over   { color: #dc2626; font-weight: 600; }
+
   /* Stats bar */
   .stats-bar {
     display: flex;
@@ -389,7 +404,7 @@ function createInitialSlices(filters) {
       hqIncluded: null, titleGroupIdx: null, titleGroupLabel: null,
       industryIncluded: null, stateLabel: null,
       individualTitleIdx: null, individualTitleLabel: null, yipBucket: null,
-      count: null, url: buildURL(fm),
+      parentCount: null, count: null, url: buildURL(fm),
     });
   } else {
     for (const hcVal of toSplit) {
@@ -659,6 +674,7 @@ function mergeSlices(prevIdx, currIdx) {
     titleGroupIdx, titleGroupLabel,
     industryIncluded, stateLabel,
     individualTitleIdx, individualTitleLabel, yipBucket,
+    parentCount: prev.parentCount,
     count: prev.count + curr.count,
     url: buildURL(mergedFM),
   };
@@ -756,7 +772,46 @@ function renderTable() {
   }
 
   let rows = '';
+  const seenPids = new Set();
+  // Pre-index siblings by pid for the group header totals
+  const siblingsByPid = {};
+  slices.forEach(s => {
+    if (s.parentCount !== null) {
+      if (!siblingsByPid[s.pid]) siblingsByPid[s.pid] = [];
+      siblingsByPid[s.pid].push(s);
+    }
+  });
+
   slices.forEach((slice, idx) => {
+    // Group header — shown once before the first child of each re-sliced group
+    if (slice.parentCount !== null && !seenPids.has(slice.pid)) {
+      seenPids.add(slice.pid);
+      const siblings   = siblingsByPid[slice.pid];
+      const childTotal = siblings.reduce((sum, s) => s.count !== null ? sum + s.count : sum, 0);
+      const counted    = siblings.filter(s => s.count !== null).length;
+      const total      = siblings.length;
+      const parentN    = slice.parentCount;
+
+      let diffHtml = '';
+      if (counted > 0) {
+        const diff = childTotal - parentN;
+        if (diff === 0) {
+          diffHtml = `<span class="group-sep">|</span><span class="group-diff-match">✓ exact match</span>`;
+        } else if (diff < 0) {
+          diffHtml = `<span class="group-sep">|</span><span class="group-diff-gap">⚠ ${Math.abs(diff).toLocaleString()} fewer (possible gap)</span>`;
+        } else {
+          diffHtml = `<span class="group-sep">|</span><span class="group-diff-over">⚠ +${diff.toLocaleString()} more (overlap)</span>`;
+        }
+      }
+
+      rows += `<tr class="group-header-row"><td colspan="6"><div class="group-header">
+        <span>↳ Parent had <strong>${parentN.toLocaleString()}</strong> results</span>
+        <span class="group-sep">|</span>
+        <span>Children: ${counted}/${total} counted, total <strong>${counted > 0 ? childTotal.toLocaleString() : '—'}</strong></span>
+        ${diffHtml}
+      </div></td></tr>`;
+    }
+
     const countVal = slice.count !== null ? slice.count : '';
     rows += `
       <tr id="row-${slice.id}">
@@ -846,6 +901,8 @@ function doReslice(idx) {
   const slice = slices[idx];
   const newSlices = resliceSlice(slice);
   if (newSlices.length === 0) return;
+  // Stamp the parent's count on every child so the group header can compare
+  newSlices.forEach(s => { s.parentCount = slice.count; });
   slices.splice(idx, 1, ...newSlices);
   renderTable();
   updateStats();
