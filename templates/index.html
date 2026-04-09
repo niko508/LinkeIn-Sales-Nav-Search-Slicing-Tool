@@ -347,12 +347,12 @@ function parseNavURL(raw) {
     }
     // content between List( and its matching )
     const listContent = queryStr.slice(listStart, i - 1);
-    // Parse individual value entries: (id:X,text:Y,selectionType:Z)
+    // Parse individual value entries: (id:X,text:Y,selectionType:Z) or (text:Y,selectionType:Z)
     const values = [];
-    const valRe = /\(id:([^,]+),text:([^,)]+),selectionType:([^)]+)\)/g;
+    const valRe = /\((?:id:([^,]+),)?text:([^,)]+),selectionType:([^)]+)\)/g;
     let vm;
     while ((vm = valRe.exec(listContent)) !== null) {
-      values.push({ id: vm[1], text: decodeURIComponent(vm[2].replace(/\+/g, ' ')), selectionType: vm[3] });
+      values.push({ id: vm[1] || '', text: decodeURIComponent(vm[2].replace(/\+/g, ' ')), selectionType: vm[3] });
     }
     filters[typeName] = values;
   }
@@ -363,7 +363,10 @@ function parseNavURL(raw) {
 // ─── URL Building ─────────────────────────────────────────────────────────────
 
 function buildFilterStr(type, values) {
-  const vStr = values.map(v => `(id:${v.id},text:${encodeURIComponent(v.text)},selectionType:${v.selectionType || 'INCLUDED'})`).join(',');
+  const vStr = values.map(v => {
+    const idPart = v.id ? `id:${v.id},` : '';
+    return `(${idPart}text:${encodeURIComponent(v.text)},selectionType:${v.selectionType || 'INCLUDED'})`;
+  }).join(',');
   return `(type:${type},values:List(${vStr}))`;
 }
 
