@@ -779,14 +779,23 @@ function renderTable() {
   let rows = '';
   const seenPids = new Set();
 
-  // Pre-index siblings by pid and build ancestry lookup
-  const siblingsByPid = {};
-  const pidParentCount = {};  // pid → that group's parentCount (for ancestry labels)
+  // Pre-index siblings by pid, ancestry lookup, and sub-group contributions
+  const siblingsByPid    = {};  // pid → direct child slices still present
+  const pidParentCount   = {};  // pid → that group's parentCount
+  const subGroupByParent = {};  // parentPid → [{pid, parentCount}] for re-split children
+  const seenSubPids      = new Set();
+
   slices.forEach(s => {
     if (!pidParentCount.hasOwnProperty(s.pid)) pidParentCount[s.pid] = s.parentCount;
     if (s.parentCount !== null) {
       if (!siblingsByPid[s.pid]) siblingsByPid[s.pid] = [];
       siblingsByPid[s.pid].push(s);
+    }
+    // Track sub-groups so parent headers can credit their parentCount contributions
+    if (s.parentPid != null && !seenSubPids.has(s.pid)) {
+      seenSubPids.add(s.pid);
+      if (!subGroupByParent[s.parentPid]) subGroupByParent[s.parentPid] = [];
+      subGroupByParent[s.parentPid].push({ pid: s.pid, parentCount: s.parentCount });
     }
   });
 
@@ -794,27 +803,53 @@ function renderTable() {
     // Group header — shown once before the first child of each re-sliced group
     if (slice.parentCount !== null && !seenPids.has(slice.pid)) {
       seenPids.add(slice.pid);
-      const siblings   = siblingsByPid[slice.pid];
-      const childTotal = siblings.reduce((sum, s) => s.count !== null ? sum + s.count : sum, 0);
-      const counted    = siblings.filter(s => s.count !== null).length;
-      const total      = siblings.length;
-      const parentN    = slice.parentCount;
+      const groupPid      = slice.pid;
+      const directSibs    = siblingsByPid[groupPid] || [];
+      const subGroups     = subGroupByParent[groupPid] || [];
 
-      // Ancestry breadcrumb: if this sub-group has a parentPid that itself had a parent count, show it
+      // Direct children still present in the array
+      const directCounted = directSibs.filter(s => s.count !== null).length;
+      const directTotal   = directSibs.reduce((sum, s) => s.count !== null ? sum + s.count : sum, 0);
+
+      // Sub-splits: children that were re-sliced away; credit their pre-split count
+      const subSplitTotal = subGroups.reduce((sum, sg) => sum + (sg.parentCount || 0), 0);
+      const subSplitCount = subGroups.length;
+
+      // Combined coverage
+      const coveredTotal = directTotal + subSplitTotal;
+      const parentN      = slice.parentCount;
+      const anyDirect    = directCounted > 0;
+      const anySub       = subSplitCount > 0;
+
+      // Ancestry breadcrumb
       const grandparentN = slice.parentPid != null ? pidParentCount[slice.parentPid] : null;
       const ancestorHtml = (grandparentN != null)
         ? `<span class="group-ancestor">from <strong>${grandparentN.toLocaleString()}</strong> →</span>`
         : '';
 
+      // Coverage label
+      let coverageHtml = '';
+      if (anyDirect && anySub) {
+        coverageHtml = `<span>Direct: <strong>${directTotal.toLocaleString()}</strong> (${directCounted}/${directSibs.length})` +
+          ` + re-split: <strong>${subSplitTotal.toLocaleString()}</strong> = <strong>${coveredTotal.toLocaleString()}</strong></span>`;
+      } else if (anyDirect) {
+        coverageHtml = `<span>Children: ${directCounted}/${directSibs.length} counted, total <strong>${directTotal.toLocaleString()}</strong></span>`;
+      } else if (anySub) {
+        coverageHtml = `<span>Re-split covered: <strong>${subSplitTotal.toLocaleString()}</strong></span>`;
+      } else {
+        coverageHtml = `<span>Children: 0/${directSibs.length + subSplitCount} counted</span>`;
+      }
+
+      // Diff
       let diffHtml = '';
-      if (counted > 0) {
-        const diff = childTotal - parentN;
+      if (anyDirect || anySub) {
+        const diff = coveredTotal - parentN;
         if (diff === 0) {
           diffHtml = `<span class="group-sep">|</span><span class="group-diff-match">✓ exact match</span>`;
         } else if (diff < 0) {
           diffHtml = `<span class="group-sep">|</span><span class="group-diff-gap">⚠ ${Math.abs(diff).toLocaleString()} fewer</span>`;
         } else {
-          diffHtml = `<span class="group-sep">|</span><span class="group-diff-over">⚠ +${diff.toLocaleString()} more (overlap)</span>`;
+          diffHtml = `<span class="group-sep">|</span><span class="group-diff-over">⚠ +${diff.toLocaleString()} overlap</span>`;
         }
       }
 
@@ -823,7 +858,7 @@ function renderTable() {
         ${ancestorHtml}
         <span>↳ Parent had <strong>${parentN.toLocaleString()}</strong> results</span>
         <span class="group-sep">|</span>
-        <span>Children: ${counted}/${total} counted, total <strong>${counted > 0 ? childTotal.toLocaleString() : '—'}</strong></span>
+        ${coverageHtml}
         ${diffHtml}
       </div></td></tr>`;
     }
