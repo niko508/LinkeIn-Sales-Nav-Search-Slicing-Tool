@@ -102,12 +102,16 @@
   /* Group header row — shows parent count vs children sum */
   .group-header-row td { padding: 0; border-bottom: none; }
   .group-header {
-    display: flex; align-items: center; gap: 16px;
-    padding: 6px 16px;
+    display: flex; align-items: center; gap: 12px;
+    padding: 5px 16px;
     background: #f0f9ff;
     border-left: 3px solid #38bdf8;
     font-size: .78rem; color: #0369a1;
   }
+  .group-header.depth-2 { background: #e0f2fe; border-left-color: #0284c7; padding-left: 32px; }
+  .group-header.depth-3 { background: #bae6fd; border-left-color: #0369a1; padding-left: 48px; }
+  .group-ancestor { color: #7dd3fc; font-size: .74rem; }
+  .group-ancestor strong { color: #0369a1; }
   .group-header strong { color: #0c4a6e; }
   .group-sep { color: #7dd3fc; }
   .group-diff-match  { color: #16a34a; font-weight: 600; }
@@ -404,7 +408,7 @@ function createInitialSlices(filters) {
       hqIncluded: null, titleGroupIdx: null, titleGroupLabel: null,
       industryIncluded: null, stateLabel: null,
       individualTitleIdx: null, individualTitleLabel: null, yipBucket: null,
-      parentCount: null, count: null, url: buildURL(fm),
+      parentPid: null, parentCount: null, count: null, url: buildURL(fm),
     });
   } else {
     for (const hcVal of toSplit) {
@@ -415,7 +419,7 @@ function createInitialSlices(filters) {
         hqIncluded: null, titleGroupIdx: null, titleGroupLabel: null,
         industryIncluded: null, stateLabel: null,
         individualTitleIdx: null, individualTitleLabel: null, yipBucket: null,
-        parentCount: null, count: null, url: buildURL(fm),
+        parentPid: null, parentCount: null, count: null, url: buildURL(fm),
       });
     }
   }
@@ -674,6 +678,7 @@ function mergeSlices(prevIdx, currIdx) {
     titleGroupIdx, titleGroupLabel,
     industryIncluded, stateLabel,
     individualTitleIdx, individualTitleLabel, yipBucket,
+    parentPid: prev.parentPid,
     parentCount: prev.parentCount,
     count: prev.count + curr.count,
     url: buildURL(mergedFM),
@@ -773,9 +778,12 @@ function renderTable() {
 
   let rows = '';
   const seenPids = new Set();
-  // Pre-index siblings by pid for the group header totals
+
+  // Pre-index siblings by pid and build ancestry lookup
   const siblingsByPid = {};
+  const pidParentCount = {};  // pid → that group's parentCount (for ancestry labels)
   slices.forEach(s => {
+    if (!pidParentCount.hasOwnProperty(s.pid)) pidParentCount[s.pid] = s.parentCount;
     if (s.parentCount !== null) {
       if (!siblingsByPid[s.pid]) siblingsByPid[s.pid] = [];
       siblingsByPid[s.pid].push(s);
@@ -792,19 +800,27 @@ function renderTable() {
       const total      = siblings.length;
       const parentN    = slice.parentCount;
 
+      // Ancestry breadcrumb: if this sub-group has a parentPid that itself had a parent count, show it
+      const grandparentN = slice.parentPid != null ? pidParentCount[slice.parentPid] : null;
+      const ancestorHtml = (grandparentN != null)
+        ? `<span class="group-ancestor">from <strong>${grandparentN.toLocaleString()}</strong> →</span>`
+        : '';
+
       let diffHtml = '';
       if (counted > 0) {
         const diff = childTotal - parentN;
         if (diff === 0) {
           diffHtml = `<span class="group-sep">|</span><span class="group-diff-match">✓ exact match</span>`;
         } else if (diff < 0) {
-          diffHtml = `<span class="group-sep">|</span><span class="group-diff-gap">⚠ ${Math.abs(diff).toLocaleString()} fewer (possible gap)</span>`;
+          diffHtml = `<span class="group-sep">|</span><span class="group-diff-gap">⚠ ${Math.abs(diff).toLocaleString()} fewer</span>`;
         } else {
           diffHtml = `<span class="group-sep">|</span><span class="group-diff-over">⚠ +${diff.toLocaleString()} more (overlap)</span>`;
         }
       }
 
-      rows += `<tr class="group-header-row"><td colspan="6"><div class="group-header">
+      const depthClass = slice.depth >= 3 ? 'depth-3' : slice.depth === 2 ? 'depth-2' : '';
+      rows += `<tr class="group-header-row"><td colspan="6"><div class="group-header ${depthClass}">
+        ${ancestorHtml}
         <span>↳ Parent had <strong>${parentN.toLocaleString()}</strong> results</span>
         <span class="group-sep">|</span>
         <span>Children: ${counted}/${total} counted, total <strong>${counted > 0 ? childTotal.toLocaleString() : '—'}</strong></span>
@@ -901,9 +917,22 @@ function doReslice(idx) {
   const slice = slices[idx];
   const newSlices = resliceSlice(slice);
   if (newSlices.length === 0) return;
-  // Stamp the parent's count on every child so the group header can compare
-  newSlices.forEach(s => { s.parentCount = slice.count; });
-  slices.splice(idx, 1, ...newSlices);
+
+  const parentPid = slice.pid;
+  newSlices.forEach(s => {
+    s.parentCount = slice.count;  // for the group header comparison
+    s.parentPid   = parentPid;    // for ancestry breadcrumb in headers
+  });
+
+  // Remove the original slice, then INSERT children AFTER the last remaining
+  // sibling so the parent group's context stays visible at the top.
+  slices.splice(idx, 1);
+  let insertAt = idx; // fallback: same position if no siblings remain
+  for (let i = 0; i < slices.length; i++) {
+    if (slices[i].pid === parentPid) insertAt = i + 1;
+  }
+  slices.splice(insertAt, 0, ...newSlices);
+
   renderTable();
   updateStats();
 }
