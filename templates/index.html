@@ -180,6 +180,7 @@
   .status-pending  { background: #f3f4f6; color: #6b7280; }
   .status-verified { background: #d1fae5; color: #065f46; }
   .status-overlimit { background: #fee2e2; color: #991b1b; }
+  .status-accepted { background: #fef3c7; color: #92400e; }
 
   .actions-cell { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 
@@ -233,7 +234,7 @@
     <div class="stat stat-count">Total Results: <span id="statCount">—</span></div>
     <div class="spacer"></div>
     <button class="btn btn-secondary btn-sm" onclick="verifyAll()">Verify All</button>
-    <button class="btn btn-primary btn-sm" onclick="copyVerified()">Copy verified URLs</button>
+    <button class="btn btn-primary btn-sm" onclick="copyVerified()">Copy ready URLs</button>
   </div>
 
   <!-- Slices table -->
@@ -411,7 +412,7 @@ function createInitialSlices(filters) {
       hqIncluded: null, titleGroupIdx: null, titleGroupLabel: null,
       industryIncluded: null, stateLabel: null,
       individualTitleIdx: null, individualTitleLabel: null, yipBucket: null,
-      parentPid: null, parentCount: null, count: null, url: buildURL(fm),
+      parentPid: null, parentCount: null, count: null, accepted: false, url: buildURL(fm),
     });
   } else {
     for (const hcVal of toSplit) {
@@ -422,7 +423,7 @@ function createInitialSlices(filters) {
         hqIncluded: null, titleGroupIdx: null, titleGroupLabel: null,
         industryIncluded: null, stateLabel: null,
         individualTitleIdx: null, individualTitleLabel: null, yipBucket: null,
-        parentPid: null, parentCount: null, count: null, url: buildURL(fm),
+        parentPid: null, parentCount: null, count: null, accepted: false, url: buildURL(fm),
       });
     }
   }
@@ -490,6 +491,7 @@ function resliceSlice(slice) {
     individualTitleIdx:   slice.individualTitleIdx,
     individualTitleLabel: slice.individualTitleLabel,
     yipBucket:            slice.yipBucket,
+    accepted:             false,
   };
 
   if (_canSplitByHQ(slice)) {
@@ -684,6 +686,7 @@ function mergeSlices(prevIdx, currIdx) {
     parentPid: prev.parentPid,
     parentCount: prev.parentCount,
     count: prev.count + curr.count,
+    accepted: false,
     url: buildURL(mergedFM),
   };
 
@@ -696,7 +699,8 @@ function mergeSlices(prevIdx, currIdx) {
 
 function getStatus(slice) {
   if (slice.count === null) return 'pending';
-  if (slice.count > 2500)  return 'overlimit';
+  if (slice.count > 2500 && slice.accepted) return 'accepted';
+  if (slice.count > 2500) return 'overlimit';
   return 'verified';
 }
 
@@ -749,6 +753,7 @@ function renderStatusBadge(slice) {
   if (s === 'pending')   return `<span class="status-badge status-pending">— pending</span>`;
   if (s === 'verified')  return `<span class="status-badge status-verified">✓ verified</span>`;
   if (s === 'overlimit') return `<span class="status-badge status-overlimit">⚠ over limit</span>`;
+  if (s === 'accepted')  return `<span class="status-badge status-accepted">⚠ accepted (cap 2,500)</span>`;
 }
 
 function renderActions(slice, idx) {
@@ -759,7 +764,8 @@ function renderActions(slice, idx) {
     if (canResliceFurther(slice)) {
       html += `<button class="btn btn-sm btn-reslice" onclick="doReslice(${idx})">Re-slice</button>`;
     } else {
-      html += `<span class="cannot-split-msg">Cannot split further — try narrowing your original search</span>`;
+      html += `<span class="cannot-split-msg">Cannot split further</span>`;
+      html += `<button class="btn btn-sm btn-secondary" onclick="doAccept(${idx})" title="Accept this URL — you will scrape up to 2,500 contacts from it">Accept anyway</button>`;
     }
   }
 
@@ -920,13 +926,14 @@ function renderFiltersCard(filters) {
 function updateStats() {
   const total     = slices.length;
   const verified  = slices.filter(s => getStatus(s) === 'verified').length;
+  const accepted  = slices.filter(s => getStatus(s) === 'accepted').length;
   const overlimit = slices.filter(s => getStatus(s) === 'overlimit').length;
   const pending   = slices.filter(s => getStatus(s) === 'pending').length;
   const countSum  = slices.reduce((sum, s) => s.count !== null ? sum + s.count : sum, 0);
   const hasAny    = slices.some(s => s.count !== null);
 
   document.getElementById('statTotal').textContent    = total;
-  document.getElementById('statVerified').textContent  = verified;
+  document.getElementById('statVerified').textContent  = accepted > 0 ? `${verified} (+${accepted} accepted)` : verified;
   document.getElementById('statOverlimit').textContent = overlimit;
   document.getElementById('statPending').textContent   = pending;
   document.getElementById('statCount').textContent     = hasAny ? countSum.toLocaleString() : '—';
@@ -975,6 +982,12 @@ function doReslice(idx) {
   updateStats();
 }
 
+function doAccept(idx) {
+  slices[idx].accepted = true;
+  renderTable();
+  updateStats();
+}
+
 function doMerge(currIdx) {
   mergeSlices(currIdx - 1, currIdx);
 }
@@ -1018,11 +1031,11 @@ function resetAll() {
 }
 
 function copyVerified() {
-  const verified = slices.filter(s => getStatus(s) === 'verified');
-  if (verified.length === 0) { alert('No verified slices yet.'); return; }
-  const urls = verified.map(s => s.url).join('\n');
+  const ready = slices.filter(s => getStatus(s) === 'verified' || getStatus(s) === 'accepted');
+  if (ready.length === 0) { alert('No verified or accepted slices yet.'); return; }
+  const urls = ready.map(s => s.url).join('\n');
   navigator.clipboard.writeText(urls).then(() => {
-    alert(`Copied ${verified.length} verified URL(s) to clipboard.`);
+    alert(`Copied ${ready.length} URL(s) to clipboard.`);
   }).catch(() => {
     // Fallback
     const ta = document.createElement('textarea');
@@ -1031,7 +1044,7 @@ function copyVerified() {
     ta.select();
     document.execCommand('copy');
     document.body.removeChild(ta);
-    alert(`Copied ${verified.length} verified URL(s) to clipboard.`);
+    alert(`Copied ${ready.length} URL(s) to clipboard.`);
   });
 }
 
